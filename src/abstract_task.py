@@ -15,7 +15,7 @@ class AbstractTask(ABC):
     def __init__(
         self, device: torch.device = "cpu", generator: Optional[torch.Generator] = None
     ) -> None:
-        """Initializes the class Task.
+        """Initializes the class AbstractTask.
 
         Args:
             device (torch.dtype):

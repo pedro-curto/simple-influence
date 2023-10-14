@@ -70,7 +70,7 @@ def prepare_test(
     return model.to(device=device), train_loader, valid_loader, task
 
 
-def make_dummy_linear_module(bias: bool = False, seed: int = 0) -> nn.Module:
+def make_dummy_linear_module(bias: bool = True, seed: int = 0) -> nn.Module:
     torch.manual_seed(seed)
     return nn.Sequential(
         nn.Linear(10, 16, bias=bias),
@@ -92,7 +92,7 @@ def make_dummy_linear_loader(
     return data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
 
-def make_dummy_conv_module(bias: bool = False, seed: int = 0) -> nn.Module:
+def make_dummy_conv_module(bias: bool = True, seed: int = 0) -> nn.Module:
     torch.manual_seed(seed)
     return nn.Sequential(
         nn.Conv2d(3, 4, 3, 1, bias=bias),
@@ -104,7 +104,7 @@ def make_dummy_conv_module(bias: bool = False, seed: int = 0) -> nn.Module:
     )
 
 
-def make_dummy_conv_bn_module(bias: bool = False, seed: int = 0) -> nn.Module:
+def make_dummy_conv_bn_module(bias: bool = True, seed: int = 0) -> nn.Module:
     torch.manual_seed(seed)
     return nn.Sequential(
         nn.Conv2d(3, 4, 3, 1, bias=bias),
@@ -157,6 +157,12 @@ def make_dummy_glue_loader(
 
 
 def parameters_to_vector(parameters: List[torch.Tensor]) -> torch.Tensor:
+    """Given a list of torch Tensors, return the vectorized version.
+
+    Args:
+        parameters (list):
+            A list of PyTorch tesnors to vectorize.
+    """
     vec = []
     for param in parameters:
         vec.append(param.reshape(-1))
@@ -164,10 +170,25 @@ def parameters_to_vector(parameters: List[torch.Tensor]) -> torch.Tensor:
 
 
 def get_num_params(model: torch.nn.Module) -> int:
+    """Return the number of parameters, given a PyTorch module.
+
+    Args:
+        model (nn.Module):
+            PyTorch module.
+    """
     return parameters_to_vector(list(model.parameters())).numel()
 
 
 def check_model_equivalence(model1: nn.Module, model2: nn.Module) -> bool:
+    """Return True if two PyTorch modules have equivalent parameters and buffers
+    (e.g., batch norm statistics).
+
+    Args:
+        model1 (nn.Module):
+            The first module for comparison.
+        model2 (AbstractTask):
+            The second module for comparison.
+    """
     model1_params = list(model1.parameters())
     model2_params = list(model2.parameters())
 

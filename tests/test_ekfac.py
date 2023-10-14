@@ -3,8 +3,8 @@ import copy
 import pytest
 import torch
 
-from src.baselines.gradients_similarity import GradientsSimilarityComputer
-from src.baselines.influence import InfluenceComputer
+from src.gradient_similarity import GradientSimilarityComputer
+from src.influence_function import InfluenceFunctionComputer
 from tests.utils import check_model_equivalence, prepare_test
 
 RTOL = 1e-1
@@ -26,11 +26,10 @@ def test_model_unchanged(test_name: str) -> None:
     )
     original_model = copy.deepcopy(model)
 
-    computer = InfluenceComputer(
+    computer = InfluenceFunctionComputer(
         model=model,
-        device=DEVICE,
         task=task,
-        empirical_fisher=True,
+        use_true_fisher=False,
     )
     computer.build_curvature_blocks(train_loader)
     scores1 = computer.compute_total_influence(valid_loader, train_loader)
@@ -39,11 +38,10 @@ def test_model_unchanged(test_name: str) -> None:
     assert scores1.shape[1] == train_size
     assert check_model_equivalence(original_model, model)
 
-    computer = InfluenceComputer(
+    computer = InfluenceFunctionComputer(
         model=model,
-        device=DEVICE,
         task=task,
-        empirical_fisher=True,
+        use_true_fisher=False,
     )
     computer.build_curvature_blocks(train_loader)
     scores2 = computer.compute_total_influence(valid_loader, train_loader)
@@ -74,14 +72,14 @@ def test_batch_additivity(test_name: str) -> None:
     )
     original_model = copy.deepcopy(model)
 
-    computer_bs1 = InfluenceComputer(
-        model=model, device=DEVICE, task=task, empirical_fisher=True, sample_seed=0
+    computer_bs1 = InfluenceFunctionComputer(
+        model=model, task=task, use_true_fisher=False,
     )
     computer_bs1.build_curvature_blocks(train_loader_bs1, keep_cache=True)
     assert check_model_equivalence(original_model, model)
 
-    computer_bs8 = InfluenceComputer(
-        model=model, device=DEVICE, task=task, empirical_fisher=True, sample_seed=0
+    computer_bs8 = InfluenceFunctionComputer(
+        model=model, task=task, use_true_fisher=False,
     )
     computer_bs8.build_curvature_blocks(train_loader_bs8, keep_cache=True)
     assert check_model_equivalence(original_model, model)
@@ -125,19 +123,16 @@ def test_disable_precondition(test_name: str) -> None:
         seed=0,
     )
 
-    computer = InfluenceComputer(
-        model=model,
-        device=DEVICE,
-        task=task,
-        empirical_fisher=True,
+    computer = InfluenceFunctionComputer(
+        model=model, task=task, use_true_fisher=False,
     )
     computer.build_curvature_blocks(train_loader)
     scores = computer.compute_total_influence(
         valid_loader, train_loader, disable_precondition=True
     )
 
-    grad_computer = GradientsSimilarityComputer(
-        model, device=DEVICE, task=task, metric="dot", last_only=False
+    grad_computer = GradientSimilarityComputer(
+        model, task=task, metric="dot",
     )
     grad_scores = grad_computer.compute_total_influence(valid_loader, train_loader)
     assert torch.allclose(scores, grad_scores, rtol=RTOL, atol=ATOL)
@@ -168,21 +163,17 @@ def test_transformer_masks(test_name: str) -> None:
         seed=0,
     )
 
-    no_pad_computer = InfluenceComputer(
+    no_pad_computer = InfluenceFunctionComputer(
         model=model,
-        device=DEVICE,
         task=task,
-        empirical_fisher=True,
-        only_use_kronecker_modules=True,
+        use_true_fisher=False,
     )
     no_pad_computer.build_curvature_blocks(no_pad_train_loader, keep_cache=True)
 
-    computer = InfluenceComputer(
+    computer = InfluenceFunctionComputer(
         model=model,
-        device=DEVICE,
         task=task,
-        empirical_fisher=True,
-        only_use_kronecker_modules=True,
+        use_true_fisher=False,
     )
     computer.build_curvature_blocks(train_loader, keep_cache=True)
 

@@ -32,25 +32,19 @@ def extract_patches(
     return x
 
 
-def make_grad_to_matrix(module: nn.Module):
-    if isinstance(module, nn.Conv2d):
-        p_grad_mat = module.weight.grad.view(module.weight.grad.size(0), -1)
-        if module.bias is not None:
-            p_grad_mat = torch.cat([p_grad_mat, module.bias.grad.view(-1, 1)], 1)
-    else:
-        p_grad_mat = module.weight.grad
-        if module.bias is not None:
-            p_grad_mat = torch.cat([p_grad_mat, module.bias.grad.view(-1, 1)], 1)
-    return p_grad_mat
-
-
 def make_grad_dict_to_matrix(module, module_name, grad_dict):
-    if isinstance(module, nn.Conv2d):
+    if isinstance(module, nn.Linear):
+        p_grad_mat = grad_dict[module_name + ".weight"]
+        if module_name + ".bias" in grad_dict:
+            p_grad_mat = torch.cat(
+                (p_grad_mat, grad_dict[module_name + ".bias"].unsqueeze(-1)), -1
+            )
+    elif isinstance(module, nn.Conv2d):
         p_grad_mat = grad_dict[module_name + ".weight"]
         p_grad_mat = p_grad_mat.view(p_grad_mat.size(0), p_grad_mat.size(1), -1)
         if module_name + ".bias" in grad_dict:
             p_grad_mat = torch.cat(
-                [p_grad_mat, grad_dict[module_name + ".bias"].unsqueeze(-1)], 1
+                [p_grad_mat, grad_dict[module_name + ".bias"].unsqueeze(-1)], -1
             )
     elif isinstance(module, nn.BatchNorm2d) or isinstance(module, nn.LayerNorm):
         p_grad_mat = torch.cat(
@@ -58,12 +52,7 @@ def make_grad_dict_to_matrix(module, module_name, grad_dict):
         )
     elif isinstance(module, nn.Embedding):
         p_grad_mat = grad_dict[module_name + ".weight"]
-    elif isinstance(module, nn.Linear):
-        p_grad_mat = grad_dict[module_name + ".weight"]
-        if module_name + ".bias" in grad_dict:
-            p_grad_mat = torch.cat(
-                (p_grad_mat, grad_dict[module_name + ".bias"].unsqueeze(-1)), -1
-            )
+
     else:
         raise InvalidModuleError()
     return p_grad_mat

@@ -4,21 +4,20 @@ from typing import Any, Tuple, Union, Optional
 import torch
 from torch import nn
 
+from src.abstract_computer import AbstractComputer
 from src.abstract_task import AbstractTask
-from src.utils import (
+from src.ekfac_utils import (
     ActivationHandler,
     GradientHandler,
     InvalidModuleError,
     make_grad_dict_to_matrix,
-    make_grad_to_matrix,
 )
 
 
-class InfluenceComputer:
+class InfluenceFunctionComputer(AbstractComputer):
     supported_kronecker_modules = {"Linear", "Conv2d"}
     supported_full_modules = {"LayerNorm", "BatchNorm2d"}
     supported_diag_modules = {"Embedding"}
-    score_dtype: torch.dtype = torch.float32
     eig_dtype: torch.dtype = torch.float64
 
     def __init__(
@@ -27,35 +26,21 @@ class InfluenceComputer:
         task: AbstractTask,
         damping: Optional[float] = None,
         n_epoch: int = 1,
-        only_use_kronecker_modules: bool = False,
-        empirical_fisher: bool = False,
+        use_true_fisher: bool = True,
         cov_dtype: torch.dtype = torch.float32,
         grads_dtype: torch.dtype = torch.float32,
-        sample_seed: int = None,
     ) -> None:
-        self.model = model
+        super().__init__(model, task)
         self.func_params = dict(self.model.named_parameters())
         self.func_buffers = dict(self.model.named_buffers())
 
         self.damping = damping
         self.n_epoch = n_epoch
-        self.task = task
-        self.only_use_kronecker_modules = only_use_kronecker_modules
-        if self.only_use_kronecker_modules:
-            self.supported_full_modules = {}
-            self.supported_diag_modules = {}
 
-        self.empirical_fisher = empirical_fisher
+        self.use_true_fisher = use_true_fisher
 
         self.cov_dtype = cov_dtype
         self.grads_dtype = grads_dtype
-        self.generator = None
-        if sample_seed is not None:
-            self.generator = torch.Generator().manual_seed(sample_seed)
-
-        self.task_func = get_task(self.task)(
-            device=self.device, generator=self.generator
-        )
 
         # List of handlers.
         self._activation_handler = ActivationHandler()
@@ -85,43 +70,34 @@ class InfluenceComputer:
     def _initialize_modules(self) -> None:
         for name, module in self.model.named_modules():
             classname = module.__class__.__name__
-            if classname in self.supported_kronecker_modules:
-                # Register all modules.
-                self.modules.append(module)
-                self.modules_name.append(name)
-                self.kronecker_modules_name.append(name)
 
-                # Register forward hooks.
-                handle = module.register_forward_pre_hook(self._forward_hook)
-                self._handles.append(handle)
-
-                # Register backward hooks.
-                handle = module.register_full_backward_hook(self._backward_hook)
-                self._handles.append(handle)
-
-            if classname in self.supported_full_modules:
-                # This is only supported for LayerNorm & BatchNorm parameters (with affine set to True).
-                if module.weight is not None:
+            if name in self.task.influence_modules():
+                if classname in self.supported_kronecker_modules:
+                    # Register all modules.
                     self.modules.append(module)
                     self.modules_name.append(name)
-                    self.full_modules_name.append(name)
+                    self.kronecker_modules_name.append(name)
 
-            if classname in self.supported_diag_modules:
-                self.modules.append(module)
-                self.modules_name.append(name)
-                self.diag_modules_name.append(name)
+                    # Register forward hooks.
+                    handle = module.register_forward_pre_hook(self._forward_hook)
+                    self._handles.append(handle)
 
-        # if self.last_only:
-        #     self.modules = [self.modules[-1]]
-        #     self.modules_name = [self.modules_name[-1]]
-        #     new_handles = [self._handles[-1]]
-        #     for handle in self._handles[:-2]:
-        #         handle.remove()
-        #     self._handles = new_handles
+                    # Register backward hooks.
+                    handle = module.register_full_backward_hook(self._backward_hook)
+                    self._handles.append(handle)
 
-        print("Influences are computed on following modules:")
-        for name, module in zip(self.modules_name, self.modules):
-            print(f"({name}): {str(module)}")
+                if classname in self.supported_full_modules:
+                    # This is only supported for LayerNorm & BatchNorm parameters (with affine set to True).
+                    if module.weight is not None:
+                        self.modules.append(module)
+                        self.modules_name.append(name)
+                        self.full_modules_name.append(name)
+
+                if classname in self.supported_diag_modules:
+                    # This is supported for embedding parameters.
+                    self.modules.append(module)
+                    self.modules_name.append(name)
+                    self.diag_modules_name.append(name)
 
     def _forward_hook(self, module: nn.Module, inputs: Tuple[torch.Tensor]) -> None:
         assert len(inputs) == 1
@@ -164,7 +140,7 @@ class InfluenceComputer:
     def _train_step(
         self, batch: Any, sample: bool = False, reduction: str = "sum"
     ) -> None:
-        loss = self.task_func.get_train_loss(
+        loss = self.task.get_train_loss(
             model=self.model,
             batch=batch,
             sample=sample,
@@ -179,12 +155,12 @@ class InfluenceComputer:
         examples_seen = 0
         for _ in range(self.n_epoch):
             for batch in loader:
-                self.model.zero_grad(set_to_none=True)
-                self._activation_masks = self.task_func.get_activation_masks(batch)
+                self.model.zero_grad()
+                self._activation_masks = self.task.get_activation_masks(batch)
                 self._train_step(
-                    batch, sample=not self.empirical_fisher, reduction="sum"
+                    batch, sample=self.use_true_fisher, reduction="sum"
                 )
-                examples_seen += self.task_func.get_batch_size(batch)
+                examples_seen += self.task.get_batch_size(batch)
 
         with torch.no_grad():
             for name in self.kronecker_modules_name:
@@ -196,7 +172,7 @@ class InfluenceComputer:
                 self.pseudograd_cov[name] = self.pseudograd_cov[name].to(
                     self.grads_dtype
                 )
-        print(f"Seen {examples_seen} examples.")
+        self.logger.info(f"Seen {examples_seen} examples.")
         print("Time for computing covariances:", time.time() - t0)
 
     def fit_eigendecompositions(self, keep_cache: bool = False) -> None:
@@ -274,11 +250,11 @@ class InfluenceComputer:
         t2 = time.time()
 
         def compute_loss(_params, _buffers, _batch):
-            return self.task_func.get_train_loss(
+            return self.task.get_train_loss(
                 model=self.model,
                 batch=_batch,
                 parameter_and_buffer_dicts=(_params, _buffers),
-                sample=not self.empirical_fisher,
+                sample=self.use_true_fisher,
                 reduction="sum",
             )
 
@@ -288,7 +264,7 @@ class InfluenceComputer:
         examples_seen = 0
         for _ in range(self.n_epoch):
             for batch in loader:
-                examples_seen += self.task_func.get_batch_size(batch)
+                examples_seen += self.task.get_batch_size(batch)
                 grads_dict = torch.func.vmap(
                     ft_compute_grad,
                     in_dims=(None, None, 0),
@@ -321,7 +297,7 @@ class InfluenceComputer:
                 self.kronecker_eigvals[name] = self.kronecker_eigvals[name].to(
                     self.grads_dtype
                 )
-                if isinstance(self.damping, str) and self.damping == "heuristic":
+                if self.damping is None:
                     self.damping_factors[name] = 0.1 * torch.mean(
                         self.kronecker_eigvals[name]
                     )
@@ -334,8 +310,9 @@ class InfluenceComputer:
                 eigvals, eigvecs = torch.linalg.eigh(
                     self.full_factors[name].to(dtype=self.eig_dtype)
                 )
-                if isinstance(self.damping, str) and self.damping == "heuristic":
-                    self.damping_factors[name] = 0.1 * torch.mean(eigvals).to(
+                if self.damping is None:
+                    # Use the heuristic approach where we set damping to be.
+                    self.damping_factors[name] = 0.01 * torch.mean(eigvals).to(
                         dtype=self.grads_dtype
                     )
                 else:
@@ -414,38 +391,7 @@ class InfluenceComputer:
     ) -> torch.Tensor:
         self.model.eval()
 
-        self.model.zero_grad()
-        loss = self.task_func.get_measurement(
-            model=self.model, batch=valid_batch, sample=False, reduction="sum"
-        )
-        loss.backward()
-        with torch.no_grad():
-            query_grads_dict = {}
-            for name, module in self.model.named_modules():
-                if name in self.modules_name:
-                    query_grads_dict[name] = make_grad_to_matrix(module)
-
-        self.model.zero_grad()
-        loss = self.task_func.get_train_loss(
-            model=self.model, batch=train_batch, sample=False, reduction="sum"
-        )
-        loss.backward()
-        with torch.no_grad():
-            train_grads_dict = {}
-            for name, module in self.model.named_modules():
-                if name in self.modules_name:
-                    train_grads_dict[name] = make_grad_to_matrix(module)
-
-        score = torch.zeros(
-            1, device=self.device, dtype=self.score_dtype, requires_grad=False
-        )
-        with torch.no_grad():
-            for name in self.modules_name:
-                query_grads = query_grads_dict[name]
-                precond_query_grads = self.precondition_grads(name, query_grads)
-                train_grads = train_grads_dict[name]
-                score.add_(torch.sum(precond_query_grads * train_grads))
-        return score
+        pass
 
     def compute_total_influence(
         self,
@@ -459,31 +405,13 @@ class InfluenceComputer:
             score_table = torch.zeros(
                 (len(valid_loader.dataset), len(train_loader.dataset)),
                 dtype=self.grads_dtype,
-                device=self.device,
+                device=self.task.device,
                 requires_grad=False,
             )
 
-        def compute_train_loss(_params, _buffers, _batch):
-            return self.task_func.get_train_loss(
-                model=self.model,
-                batch=_batch,
-                parameter_and_buffer_dicts=(_params, _buffers),
-                sample=False,
-                reduction="sum",
-            )
-
-        def compute_measurement(_params, _buffers, _batch):
-            return self.task_func.get_measurement(
-                model=self.model,
-                batch=_batch,
-                parameter_and_buffer_dicts=(_params, _buffers),
-                sample=False,
-                reduction="sum",
-            )
-
-        ft_compute_train_grad = torch.func.grad(compute_train_loss, has_aux=False)
+        ft_compute_train_grad = torch.func.grad(self._compute_train_loss, has_aux=False)
         ft_compute_measurement_grad = torch.func.grad(
-            compute_measurement, has_aux=False
+            self._compute_measurement, has_aux=False
         )
         num_valid_data = len(valid_loader.dataset)
 
@@ -492,7 +420,7 @@ class InfluenceComputer:
             print(
                 f"Processed {num_processed_valid} validation data points (out of {num_valid_data})."
             )
-            valid_batch_size = self.task_func.get_batch_size(valid_batch)
+            valid_batch_size = self.task.get_batch_size(valid_batch)
 
             precond_query_grads_dict = {}
             query_grads_dict = torch.func.vmap(
@@ -519,7 +447,7 @@ class InfluenceComputer:
 
             num_processed_train = 0
             for train_batch in train_loader:
-                train_batch_size = self.task_func.get_batch_size(train_batch)
+                train_batch_size = self.task.get_batch_size(train_batch)
                 train_grads_dict = torch.func.vmap(
                     ft_compute_train_grad,
                     in_dims=(None, None, 0),

@@ -1,6 +1,6 @@
 import copy
 import math
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 import torch
 import torch.nn as nn
@@ -21,11 +21,23 @@ def construct_mlp(num_inputs: int = 784, num_classes: int = 10) -> nn.Module:
     return model
 
 
+def get_hyperparameters(data_name: str) -> Dict[str, float]:
+    if data_name == "mnist":
+        lr = 0.03
+        wd = 0.0001
+    elif data_name == "fmnist":
+        lr = 0.01
+        wd = 0.0001
+    else:
+        raise NotImplementedError()
+    return {"lr": lr, "wd": wd}
+
+
 def get_loaders(
     data_name: str,
     eval_batch_size: int = 2048,
     train_indices: Optional[List[int]] = None,
-    do_corrupt: bool = False,
+    valid_indices: Optional[List[int]] = None,
 ) -> Tuple[
     torch.utils.data.DataLoader,
     torch.utils.data.DataLoader,
@@ -39,38 +51,32 @@ def get_loaders(
             batch_size=train_batch_size,
             split="train",
             indices=train_indices,
-            do_corrupt=do_corrupt,
         )
         eval_train_loader = get_mnist_dataloader(
             batch_size=eval_batch_size,
             split="eval_train",
             indices=train_indices,
-            do_corrupt=do_corrupt,
         )
         valid_loader = get_mnist_dataloader(
             batch_size=eval_batch_size,
             split="valid",
-            indices=None,
-            do_corrupt=False,
+            indices=valid_indices,
         )
     else:
         train_loader = get_fmnist_dataloader(
             batch_size=train_batch_size,
             split="train",
             indices=train_indices,
-            do_corrupt=do_corrupt,
         )
         eval_train_loader = get_fmnist_dataloader(
             batch_size=eval_batch_size,
             split="eval_train",
             indices=train_indices,
-            do_corrupt=do_corrupt,
         )
         valid_loader = get_fmnist_dataloader(
             batch_size=eval_batch_size,
             split="valid",
-            indices=None,
-            do_corrupt=False,
+            indices=valid_indices,
         )
     return train_loader, eval_train_loader, valid_loader
 
@@ -79,7 +85,6 @@ def get_mnist_dataloader(
     batch_size: int = 128,
     split: str = "train",
     indices: List[int] = None,
-    do_corrupt: bool = False,
 ) -> torch.utils.data.DataLoader:
     assert split in ["train", "eval_train", "valid"]
 
@@ -96,29 +101,6 @@ def get_mnist_dataloader(
         train=split in ["train", "eval_train"],
         transform=transforms,
     )
-
-    if do_corrupt:
-        if split == "valid":
-            raise NotImplementedError("Corruption on validation dataset not supported.")
-        num_corrupt = math.ceil(len(dataset) * 0.1)
-        original_targets = copy.deepcopy(dataset.targets[:num_corrupt])
-        new_targets = torch.randint(
-            0,
-            10,
-            size=original_targets[:num_corrupt].shape,
-            generator=torch.Generator().manual_seed(0),
-        )
-        offsets = torch.randint(
-            1,
-            9,
-            size=new_targets[new_targets == original_targets].shape,
-            generator=torch.Generator().manual_seed(0),
-        )
-        new_targets[new_targets == original_targets] = (
-            new_targets[new_targets == original_targets] + offsets
-        ) % 10
-        assert (new_targets == original_targets).sum() == 0
-        dataset.targets[:num_corrupt] = new_targets
 
     if indices is not None:
         dataset = torch.utils.data.Subset(dataset, indices)
@@ -137,7 +119,6 @@ def get_fmnist_dataloader(
     batch_size: int = 128,
     split: str = "train",
     indices: List[int] = None,
-    do_corrupt: bool = False,
 ) -> torch.utils.data.DataLoader:
     assert split in ["train", "eval_train", "valid"]
 
@@ -153,29 +134,6 @@ def get_fmnist_dataloader(
         train=split in ["train", "eval_train"],
         transform=transforms,
     )
-
-    if do_corrupt:
-        if split == "valid":
-            raise NotImplementedError("Corruption on validation dataset not supported.")
-        num_corrupt = math.ceil(len(dataset) * 0.1)
-        original_targets = copy.deepcopy(dataset.targets[:num_corrupt])
-        new_targets = torch.randint(
-            0,
-            10,
-            size=original_targets[:num_corrupt].shape,
-            generator=torch.Generator().manual_seed(0),
-        )
-        offsets = torch.randint(
-            1,
-            9,
-            size=new_targets[new_targets == original_targets].shape,
-            generator=torch.Generator().manual_seed(0),
-        )
-        new_targets[new_targets == original_targets] = (
-            new_targets[new_targets == original_targets] + offsets
-        ) % 10
-        assert (new_targets == original_targets).sum() == 0
-        dataset.targets[:num_corrupt] = new_targets
 
     if indices is not None:
         dataset = torch.utils.data.Subset(dataset, indices)

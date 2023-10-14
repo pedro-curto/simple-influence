@@ -3,33 +3,25 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+from src.abstract_computer import AbstractComputer
 from src.abstract_task import AbstractTask
 
 
-class GradientSimilarityComputer:
-    supported_modules = {"Linear", "Conv2d", "BatchNorm2d", "LayerNorm", "Embedding"}
-    score_dtype: torch.dtype = torch.float32
+class GradientSimilarityComputer(AbstractComputer):
 
     def __init__(
         self,
         model: nn.Module,
         task: AbstractTask,
-        device: Optional[torch.device] = None,
         metric: str = "dot",
     ) -> None:
-        self.model = model
+        super().__init__(model, task)
         self.func_params = dict(self.model.named_parameters())
         self.func_buffers = dict(self.model.named_buffers())
-        if device is None:
-            self.device = next(iter(self.model.parameters())).device
-        else:
-            self.device = device
-
-        self.task = task
         self.metric = metric
         assert self.metric in ["cos", "dot"]
 
-        supported_param_names = []
+        self.supported_param_names = []
         for name, param in self.model.named_parameters():
             if any(
                 (
@@ -37,8 +29,37 @@ class GradientSimilarityComputer:
                     for module_name in self.task.influence_modules()
                 )
             ):
-                supported_param_names.append(name)
-        self.supported_param_names = supported_param_names
+                self.supported_param_names.append(name)
+
+
+
+    def _validate_inputs(self):
+        assert self.metric in ["cos", "dot"]
+        assert len(self.supported_param_names) > 0
+
+    def _compute_score(self, valid_grads_dict, train_grads_dict):
+        current_score = 0.
+        query_sq_norm = 0.
+        train_sq_norm = 0.
+        with torch.no_grad():
+            for name in self.supported_param_names:
+                current_score += (
+                        torch.matmul(valid_grads_dict[name], train_grads_dict[name].t())
+                )
+                if self.metric == "cos":
+                    query_sq_norm += torch.sum(
+                        valid_grads_dict[name] ** 2.0, -1
+                    )
+                    train_sq_norm += torch.sum(
+                        train_grads_dict[name] ** 2.0, -1
+                    )
+
+            if self.metric == "cos":
+                query_norm = torch.sqrt(query_sq_norm)
+                train_norm = torch.sqrt(train_sq_norm)
+                current_score /= query_norm.unsqueeze(-1)
+                current_score /= train_norm.unsqueeze(0)
+        return current_score.to(dtype=self.score_dtype)
 
     def compute_total_influence(
         self,
@@ -51,31 +72,13 @@ class GradientSimilarityComputer:
             score_table = torch.zeros(
                 (len(valid_loader.dataset), len(train_loader.dataset)),
                 dtype=self.score_dtype,
-                device=self.device,
+                device=self.task.device,
                 requires_grad=False,
             )
 
-        def compute_train_loss(_params, _buffers, _batch):
-            return self.task.get_train_loss(
-                model=self.model,
-                batch=_batch,
-                parameter_and_buffer_dicts=(_params, _buffers),
-                sample=False,
-                reduction="sum",
-            )
-
-        def compute_measurement(_params, _buffers, _batch):
-            return self.task.get_measurement(
-                model=self.model,
-                batch=_batch,
-                parameter_and_buffer_dicts=(_params, _buffers),
-                sample=False,
-                reduction="sum",
-            )
-
-        ft_compute_train_grad = torch.func.grad(compute_train_loss, has_aux=False)
+        ft_compute_train_grad = torch.func.grad(self._compute_train_loss, argnums=0, has_aux=False)
         ft_compute_measurement_grad = torch.func.grad(
-            compute_measurement, has_aux=False
+            self._compute_measurement, argnums=0, has_aux=False
         )
 
         num_processed_valid = 0
@@ -89,11 +92,15 @@ class GradientSimilarityComputer:
             )(self.func_params, self.func_buffers, valid_batch)
 
             with torch.no_grad():
-                for key in valid_grads_dict:
+                reshaped_valid_grads_dict = {}
+                key_list = list(valid_grads_dict.keys())
+                for key in key_list:
                     if key in self.supported_param_names:
-                        valid_grads_dict[key] = valid_grads_dict[key].reshape(
-                            valid_grads_dict[key].shape[0], -1
+                        reshaped_valid_grads_dict[key] = valid_grads_dict[key].reshape(
+                            valid_batch_size, -1
                         )
+                    del valid_grads_dict[key]
+                del valid_grads_dict
 
             num_processed_train = 0
             for train_batch in train_loader:
@@ -106,33 +113,17 @@ class GradientSimilarityComputer:
                 )(self.func_params, self.func_buffers, train_batch)
 
                 with torch.no_grad():
-                    for key in train_grads_dict:
+                    reshaped_train_grads_dict = {}
+                    key_list = list(train_grads_dict.keys())
+                    for key in key_list:
                         if key in self.supported_param_names:
-                            train_grads_dict[key] = train_grads_dict[key].reshape(
-                                train_grads_dict[key].shape[0], -1
+                            reshaped_train_grads_dict[key] = train_grads_dict[key].reshape(
+                                train_batch_size, -1
                             )
+                        del train_grads_dict[key]
+                    del train_grads_dict
 
-                current_score = 0.0
-                query_sq_norm = 0.0
-                train_sq_norm = 0.0
-                with torch.no_grad():
-                    for name in self.supported_param_names:
-                        current_score += (
-                            valid_grads_dict[name] @ train_grads_dict[name].t()
-                        )
-                        if self.metric == "cos":
-                            query_sq_norm += torch.sum(
-                                valid_grads_dict[name] ** 2.0, -1
-                            )
-                            train_sq_norm += torch.sum(
-                                train_grads_dict[name] ** 2.0, -1
-                            )
-
-                    if self.metric == "cos":
-                        query_norm = torch.sqrt(query_sq_norm)
-                        train_norm = torch.sqrt(train_sq_norm)
-                        current_score /= query_norm.unsqueeze(-1)
-                        current_score /= train_norm.unsqueeze(0)
+                current_score = self._compute_score(reshaped_valid_grads_dict, reshaped_train_grads_dict)
 
                 v_start = num_processed_valid
                 t_start = num_processed_train
@@ -142,4 +133,4 @@ class GradientSimilarityComputer:
                 ].add_(current_score)
                 num_processed_train += train_batch_size
             num_processed_valid += valid_batch_size
-        return score_table.numpy()
+        return score_table

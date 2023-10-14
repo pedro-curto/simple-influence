@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union, List
 
 import torch
 import torch.nn as nn
@@ -56,3 +56,9 @@ class RegressionTask(AbstractTask):
     def get_batch_size(self, batch: BATCH_DTYPE) -> int:
         inputs, _ = batch
         return inputs.shape[0]
+
+    def influence_modules(self) -> List[str]:
+        return ["0", "2", "4", "6"]
+
+    def representation_modules(self) -> str:
+        return "4"

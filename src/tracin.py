@@ -1,38 +1,33 @@
 import copy
-from typing import List, Optional, Union
+from typing import List, Union
 
 import torch
 import torch.nn as nn
 
-from src.baselines.gradients_similarity import GradientsSimilarityComputer
+from src.abstract_computer import AbstractComputer
+from src.gradient_similarity import GradientSimilarityComputer
 
 
-class TracinComputer:
-    score_dtype: torch.dtype = torch.float32
-
+class TracinComputer(AbstractComputer):
     def __init__(
         self,
         model: nn.Module,
-        device: Optional[torch.device] = None,
-        task: str = "classification",
+        task,
         metric: str = "cos",
-        last_only: bool = False,
     ):
+        super().__init__(model, task)
         self.model = model
         self.original_state_dict = copy.deepcopy(self.model.state_dict())
-        if device is None:
-            self.device = next(iter(self.model.parameters())).device
-        else:
-            self.device = device
+        for name, tensor in self.original_state_dict.items():
+            self.original_state_dict[name] = tensor.cpu()
 
         self.task = task
         self.metric = metric
         assert self.metric in ["cos", "dot"]
-        self.last_only = last_only
 
     def load_checkpoint(self, checkpoint: str) -> None:
         self.model.load_state_dict(torch.load(checkpoint, map_location="cpu"))
-        self.model = self.model.to(self.device)
+        self.model = self.model.to(self.task.device)
         self.model.eval()
 
     def compute_total_influence(
@@ -48,7 +43,7 @@ class TracinComputer:
             score_table = torch.zeros(
                 (len(valid_loader.dataset), len(train_loader.dataset)),
                 dtype=self.score_dtype,
-                device=self.device,
+                device=self.task.device,
                 requires_grad=False,
             )
 
@@ -57,12 +52,10 @@ class TracinComputer:
 
         for i, ckpt in enumerate(checkpoints):
             self.load_checkpoint(ckpt)
-            gc = GradientsSimilarityComputer(
+            gc = GradientSimilarityComputer(
                 model=self.model,
-                device=self.device,
                 task=self.task,
                 metric=self.metric,
-                last_only=self.last_only,
             )
             score_table += lrs[i] * gc.compute_total_influence(
                 valid_loader=valid_loader, train_loader=train_loader
@@ -71,4 +64,5 @@ class TracinComputer:
 
         score_table.div_(len(checkpoints))
         self.model.load_state_dict(self.original_state_dict)
+        self.model = self.model.to(self.task.device)
         return score_table

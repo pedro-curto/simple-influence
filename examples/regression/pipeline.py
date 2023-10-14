@@ -9,11 +9,12 @@ from sklearn.preprocessing import StandardScaler
 
 
 def construct_regression_mlp(data_name: str) -> nn.Module:
-    assert data_name in ["energy", "concrete", "parkinsons"]
-    # Both `energy` and `concrete` datasets have 8 features.
-    num_inputs = 8
+    assert data_name in ["concrete", "naval", "parkinsons"]
     if data_name == "parkinsons":
         num_inputs = 21
+    else:
+        num_inputs = 8
+
     model = torch.nn.Sequential(
         nn.Linear(num_inputs, 128, bias=True),
         nn.ReLU(),
@@ -27,12 +28,11 @@ def construct_regression_mlp(data_name: str) -> nn.Module:
 
 
 def get_hyperparameters(data_name: str) -> dict:
-    # For details, see `configure_hp.py`.
     if data_name == "concrete":
         lr = 0.03
-        wd = 0.0
-    elif data_name == "energy":
-        lr = 0.1
+        wd = 1e-05
+    elif data_name == "parkinsons":
+        lr = 0.003
         wd = 1e-05
     else:
         raise NotImplementedError()
@@ -44,14 +44,13 @@ def get_loaders(
     eval_batch_size: int = 4096,
     train_indices: Optional[List[int]] = None,
     valid_indices: Optional[List[int]] = None,
-    do_corrupt: bool = False,
     data_path: str = "data/",
 ) -> Tuple[
     torch.utils.data.DataLoader,
     torch.utils.data.DataLoader,
     torch.utils.data.DataLoader,
 ]:
-    assert data_name in ["concrete", "energy", "parkinsons"]
+    assert data_name in ["concrete", "parkinsons"]
     train_batch_size = 32
 
     train_loader = get_uci_dataloader(
@@ -60,7 +59,6 @@ def get_loaders(
         split="train",
         indices=train_indices,
         data_path=data_path,
-        do_corrupt=do_corrupt,
     )
     eval_train_loader = get_uci_dataloader(
         data_name=data_name,
@@ -68,7 +66,6 @@ def get_loaders(
         split="eval_train",
         indices=train_indices,
         data_path=data_path,
-        do_corrupt=do_corrupt,
     )
     valid_loader = get_uci_dataloader(
         data_name=data_name,
@@ -76,7 +73,6 @@ def get_loaders(
         split="valid",
         indices=valid_indices,
         data_path=data_path,
-        do_corrupt=False,
     )
     return train_loader, eval_train_loader, valid_loader
 
@@ -98,7 +94,6 @@ def get_uci_dataloader(
     batch_size: int,
     split: str,
     indices: List[int] = None,
-    do_corrupt: bool = False,
     data_path: str = "data/",
 ) -> torch.utils.data.DataLoader:
     assert split in ["train", "eval_train", "valid"]
@@ -128,17 +123,6 @@ def get_uci_dataloader(
     y_val = np.expand_dims(y_val, -1)
     y_train_scaled = scaler.fit_transform(y_train)
     y_val_scaled = scaler.transform(y_val)
-
-    if do_corrupt:
-        if split == "valid":
-            raise NotImplementedError("Corruption on validation dataset not supported.")
-        num_corrupt = math.ceil(y_train_scaled.shape[0] * 0.1)
-        new_targets = torch.normal(
-            mean=torch.zeros(y_train_scaled[:num_corrupt].shape),
-            std=1.0,
-            generator=torch.Generator().manual_seed(0),
-        )
-        y_train_scaled[:num_corrupt] = new_targets.numpy()
 
     if split in ["train", "eval_train"]:
         dataset = UCIDataset(
