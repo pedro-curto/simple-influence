@@ -1,5 +1,5 @@
 import time
-from typing import Any, Tuple, Union, Optional
+from typing import Any, Optional, Tuple, Union
 
 import torch
 from torch import nn
@@ -15,9 +15,9 @@ from src.ekfac_utils import (
 
 
 class InfluenceFunctionComputer(AbstractComputer):
-    supported_kronecker_modules = {"Linear", "Conv2d"}
-    supported_full_modules = {"LayerNorm", "BatchNorm2d"}
-    supported_diag_modules = {"Embedding"}
+    _supported_kronecker_modules = {"Linear", "Conv2d"}
+    _supported_full_modules = {"LayerNorm", "BatchNorm2d"}
+    _supported_diag_modules = {"Embedding"}
     eig_dtype: torch.dtype = torch.float64
 
     def __init__(
@@ -30,49 +30,75 @@ class InfluenceFunctionComputer(AbstractComputer):
         cov_dtype: torch.dtype = torch.float32,
         grads_dtype: torch.dtype = torch.float32,
     ) -> None:
+        """Initializes the `InfluenceFunctionComputer` class.
+
+        This class performs TDA using influence functions. More specifically, instead of using expensive
+        iterative computers such as LiSSA, the class uses EK-FAC approximation. The details can be found
+        in https://arxiv.org/pdf/2308.03296.pdf.
+
+        Args:
+            model (nn.Module):
+                The PyTorch model for which representations are computed.
+            task (AbstractTask):
+                The task for the pipeline.
+            damping (float, optional):
+                The damping term. Defaults to None, where the module-wise damping is set to be
+                0.1 x (mean of the eigenvalues).
+            n_epoch (int, optional):
+                Number of epochs to compute covariance and lambda statistics. Defaults to 1.
+            use_true_fisher (bool, optional):
+                If set to False, the class uses empirical Fisher, where the targets are set to the true targets.
+                Defalts to True, where the targets are sampled from the outputs.
+            cov_dtype (dtype, optional):
+                Dtype to store covariance statistics.
+            grads_dtype (dtype, optional):
+                Dtype to choose what dtype to use for preconditioning.
+        """
         super().__init__(model, task)
         self.func_params = dict(self.model.named_parameters())
         self.func_buffers = dict(self.model.named_buffers())
 
         self.damping = damping
         self.n_epoch = n_epoch
-
         self.use_true_fisher = use_true_fisher
-
         self.cov_dtype = cov_dtype
         self.grads_dtype = grads_dtype
 
-        # List of handlers.
+        # Define activation and gradients handler.
         self._activation_handler = ActivationHandler()
         self._gradient_handler = GradientHandler()
 
         # List of attributes to navigate modules.
         self._name_to_module = dict(self.model.named_modules())
         self._module_to_name = {v: k for k, v in self._name_to_module.items()}
-        self.modules, self.modules_name = [], []
+        self.modules = []
+        self.modules_name = []
+        # Modules, where influnece are computed using EK-FAC (e.g., Linear, Conv2d).
         self.kronecker_modules_name = []
+        # Modules, where influences are computed using the full Fisher (e.g., LayerNorm2d).
         self.full_modules_name = []
+        # Modules, where influence are computied using the diagonal Fisher (e.g., Embedding).
         self.diag_modules_name = []
 
         # List of attributes to keep track EK-FAC computation.
         self.activation_cov, self.pseudograd_cov = {}, {}
         self.activation_cov_eigvecs, self.pseudograd_cov_eigvecs = {}, {}
         self.activation_cov_eigvals, self.pseudograd_cov_eigvals = {}, {}
-        self.kronecker_eigvals = {}
-        self.full_factors = {}
-        self.diag_factors = {}
+        self.kronecker_eigvals, self.full_factors, self.diag_factors = {}, {}, {}
         self.damping_factors = {}
         self._activation_masks = None
 
         self._handles = []
-        self._initialize_modules()
+        self.initialize()
 
-    def _initialize_modules(self) -> None:
+    def initialize(self) -> None:
         for name, module in self.model.named_modules():
             classname = module.__class__.__name__
 
             if name in self.task.influence_modules():
-                if classname in self.supported_kronecker_modules:
+                self.logger.info(f"Found module {name}.")
+
+                if classname in self._supported_kronecker_modules:
                     # Register all modules.
                     self.modules.append(module)
                     self.modules_name.append(name)
@@ -86,18 +112,23 @@ class InfluenceFunctionComputer(AbstractComputer):
                     handle = module.register_full_backward_hook(self._backward_hook)
                     self._handles.append(handle)
 
-                if classname in self.supported_full_modules:
+                if classname in self._supported_full_modules:
                     # This is only supported for LayerNorm & BatchNorm parameters (with affine set to True).
                     if module.weight is not None:
                         self.modules.append(module)
                         self.modules_name.append(name)
                         self.full_modules_name.append(name)
 
-                if classname in self.supported_diag_modules:
+                if classname in self._supported_diag_modules:
                     # This is supported for embedding parameters.
                     self.modules.append(module)
                     self.modules_name.append(name)
                     self.diag_modules_name.append(name)
+
+        if len(self.modules_name) == 0:
+            error_msg = f"Cannot find any modules in {self.task.influence_modules()}."
+            self.logger.error(error_msg)
+            raise AttributeError(error_msg)
 
     def _forward_hook(self, module: nn.Module, inputs: Tuple[torch.Tensor]) -> None:
         assert len(inputs) == 1
@@ -137,9 +168,10 @@ class InfluenceFunctionComputer(AbstractComputer):
                 )
             self.pseudograd_cov[module_name].addmm_(pseudograds.t(), pseudograds)
 
-    def _train_step(
+    def _perform_forward_and_backward_pass(
         self, batch: Any, sample: bool = False, reduction: str = "sum"
     ) -> None:
+        """Perform the forward and backward pass with the given `batch`."""
         loss = self.task.get_train_loss(
             model=self.model,
             batch=batch,
@@ -157,7 +189,7 @@ class InfluenceFunctionComputer(AbstractComputer):
             for batch in loader:
                 self.model.zero_grad()
                 self._activation_masks = self.task.get_activation_masks(batch)
-                self._train_step(
+                self._perform_forward_and_backward_pass(
                     batch, sample=self.use_true_fisher, reduction="sum"
                 )
                 examples_seen += self.task.get_batch_size(batch)
@@ -173,7 +205,7 @@ class InfluenceFunctionComputer(AbstractComputer):
                     self.grads_dtype
                 )
         self.logger.info(f"Seen {examples_seen} examples.")
-        print("Time for computing covariances:", time.time() - t0)
+        self.logger.info(f"Time for computing covariances: {time.time() - t0}")
 
     def fit_eigendecompositions(self, keep_cache: bool = False) -> None:
         t1 = time.time()
@@ -201,7 +233,7 @@ class InfluenceFunctionComputer(AbstractComputer):
                 if not keep_cache:
                     del self.pseudograd_cov[name]
                     del self.pseudograd_cov_eigvals[name]
-        print("Time for computing eigendecomposition:", time.time() - t1)
+        self.logger.info(f"Time for eigendecomposition: {time.time() - t1}")
 
     def compute_kronecker_lambda(
         self, module_name: str, per_batch_grads: torch.Tensor

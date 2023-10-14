@@ -1,6 +1,6 @@
 import copy
 import math
-from typing import List, Optional, Tuple, Dict
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn

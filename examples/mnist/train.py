@@ -8,10 +8,8 @@ import torch.nn.functional as F
 from torch.nn import CrossEntropyLoss
 from torch.optim import SGD
 
-from examples.mnist.pipeline import construct_mlp, get_loaders
-from examples.utils import set_seed, clear_gpu_cache
-
-from examples.mnist.pipeline import get_hyperparameters
+from examples.mnist.pipeline import construct_mlp, get_hyperparameters, get_loaders
+from examples.utils import clear_gpu_cache, set_seed
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -70,7 +68,8 @@ def evaluate(
 
 
 def main(
-    data_name: str = "mnist", num_train: int = 5,
+    data_name: str = "mnist",
+    num_train: int = 5,
 ) -> None:
     os.makedirs("files", exist_ok=True)
     os.makedirs("files/checkpoints", exist_ok=True)

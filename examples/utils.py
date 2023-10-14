@@ -1,10 +1,10 @@
+import gc
 import os
 import random
 import struct
 
 import numpy as np
 import torch
-import gc
 
 
 def set_seed(seed: int) -> None:

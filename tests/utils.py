@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 import torch
 import torchvision
@@ -13,7 +13,7 @@ from tests.dummy_tasks import ConvBNTask, ConvTask, MLPTask
 
 def prepare_test(
     test_name: str,
-    device: torch.device = torch.device("cpu"),
+    device: Union[torch.device, str] = torch.device("cpu"),
     train_size: int = 32,
     valid_size: int = 16,
     train_batch_size: int = 4,
@@ -23,42 +23,68 @@ def prepare_test(
 ) -> Tuple[
     nn.Module, torch.utils.data.DataLoader, torch.utils.data.DataLoader, AbstractTask
 ]:
+    """Obtain model, data loaders, and task based on specified test configuration.
+
+    This function supports four different test scenarios, each identified by its `test_name`:
+    1. "mlp": Regression task using a 2 hidden-layer MLP.
+    2. "conv: Classification task with a convolutional neural network.
+    3. "conv_bn": Classification task with a convolutional neural network (the architecture uses batch norm).
+    4. "glue": Text classification task utilizing the BERT model.
+
+    Args:
+        test_name (str):
+            Identifier for the test scenario.
+        device (torch.device, str, optional):
+            Computational device for the test. Defaults to cpu.
+        train_size (int, optional):
+            Size of the synthetic training dataset. Defaults to 32.
+        valid_size (int, optional):
+            Size of the synthetic validation dataset. Defaults to 16.
+        train_batch_size (int, optional):
+            Batch size for the training data loader. Defaults to 4.
+        valid_batch_size (int, optional):
+            Batch size for the validation data loader. Defaults to 4.
+        do_not_pad (bool, optional):
+            If set, avoids padding batches for Transformer-based models. Defaults to False.
+        seed (int, optional):
+            Random seed for model initialization and other stochastic operations. Defaults to 0.
+    """
     if test_name == "mlp":
-        model = make_dummy_linear_module(seed=seed)
-        train_loader = make_dummy_linear_loader(
+        model = make_dummy_mlp_module(seed=seed)
+        train_loader = make_dummy_regression_loader(
             batch_size=train_batch_size, num_data=train_size, seed=seed
         )
-        valid_loader = make_dummy_linear_loader(
+        valid_loader = make_dummy_regression_loader(
             batch_size=valid_batch_size, num_data=valid_size, seed=seed
         )
         task = MLPTask(device=device)
     elif test_name == "conv":
         model = make_dummy_conv_module(seed=seed)
-        train_loader = make_dummy_conv_loader(
+        train_loader = make_dummy_classification_loader(
             batch_size=train_batch_size, num_data=train_size, seed=seed
         )
-        valid_loader = make_dummy_conv_loader(
+        valid_loader = make_dummy_classification_loader(
             batch_size=valid_batch_size, num_data=valid_size, seed=seed
         )
         task = ConvTask(device=device)
     elif test_name == "conv_bn":
         model = make_dummy_conv_bn_module(seed=seed)
-        train_loader = make_dummy_conv_loader(
+        train_loader = make_dummy_classification_loader(
             batch_size=train_batch_size, num_data=train_size, seed=seed
         )
-        valid_loader = make_dummy_conv_loader(
+        valid_loader = make_dummy_classification_loader(
             batch_size=valid_batch_size, num_data=valid_size, seed=seed
         )
         task = ConvBNTask(device=device)
     elif test_name == "transformer":
         model = make_glue_module(seed=seed)
-        train_loader = make_dummy_glue_loader(
+        train_loader = make_qnli_loader(
             batch_size=train_batch_size,
             num_data=train_size,
             do_not_pad=do_not_pad,
             seed=seed,
         )
-        valid_loader = make_dummy_glue_loader(
+        valid_loader = make_qnli_loader(
             batch_size=valid_batch_size,
             num_data=valid_size,
             do_not_pad=do_not_pad,
@@ -66,11 +92,19 @@ def prepare_test(
         )
         task = TextClassificationTask(device=device)
     else:
-        raise NotImplementedError
+        raise NotImplementedError(f"{test_name} is not a valid test configuration.")
     return model.to(device=device), train_loader, valid_loader, task
 
 
-def make_dummy_linear_module(bias: bool = True, seed: int = 0) -> nn.Module:
+def make_dummy_mlp_module(bias: bool = True, seed: int = 0) -> nn.Module:
+    """Creates an MLP model.
+
+    Args:
+        bias (str, optional):
+            If set, use bias term. Defaults to True.
+        seed (int, optional):
+            Random seed for model initialization. Defaults to 0.
+    """
     torch.manual_seed(seed)
     return nn.Sequential(
         nn.Linear(10, 16, bias=bias),
@@ -81,9 +115,19 @@ def make_dummy_linear_module(bias: bool = True, seed: int = 0) -> nn.Module:
     )
 
 
-def make_dummy_linear_loader(
-    batch_size: int = 1, num_data: int = 16, seed: int = 0
+def make_dummy_regression_loader(
+    batch_size: int, num_data: int, seed: int = 0
 ) -> torch.utils.data.DataLoader:
+    """Creates a synthetic regression dataset and return the data loader.
+
+    Args:
+        batch_size (int):
+            Batch size for the data loader.
+        num_data (int):
+            Size of the synthetic dataset.
+        seed (int, optional):
+            Random seed for dataset generation. Defaults to 0.
+    """
     torch.manual_seed(seed)
     dataset = data.TensorDataset(
         torch.randn((num_data, 10), dtype=torch.float32),
@@ -93,6 +137,14 @@ def make_dummy_linear_loader(
 
 
 def make_dummy_conv_module(bias: bool = True, seed: int = 0) -> nn.Module:
+    """Creates an CNN model.
+
+    Args:
+        bias (str, optional):
+            If set, use bias term. Defaults to True.
+        seed (int, optional):
+            Random seed for model initialization. Defaults to 0.
+    """
     torch.manual_seed(seed)
     return nn.Sequential(
         nn.Conv2d(3, 4, 3, 1, bias=bias),
@@ -105,6 +157,14 @@ def make_dummy_conv_module(bias: bool = True, seed: int = 0) -> nn.Module:
 
 
 def make_dummy_conv_bn_module(bias: bool = True, seed: int = 0) -> nn.Module:
+    """Creates an CNN model (with batch normalization).
+
+    Args:
+        bias (str, optional):
+            If set, use bias term. Defaults to True.
+        seed (int, optional):
+            Random seed for model initialization. Defaults to 0.
+    """
     torch.manual_seed(seed)
     return nn.Sequential(
         nn.Conv2d(3, 4, 3, 1, bias=bias),
@@ -118,9 +178,19 @@ def make_dummy_conv_bn_module(bias: bool = True, seed: int = 0) -> nn.Module:
     )
 
 
-def make_dummy_conv_loader(
-    batch_size: int = 1, num_data: int = 16, seed: int = 0
+def make_dummy_classification_loader(
+    batch_size: int, num_data: int, seed: int = 0
 ) -> torch.utils.data.DataLoader:
+    """Creates a synthetic classification image dataset and return the data loader.
+
+    Args:
+        batch_size (int):
+            Batch size for the data loader.
+        num_data (int):
+            Size of the synthetic dataset.
+        seed (int, optional):
+            Random seed for dataset generation. Defaults to 0.
+    """
     torch.manual_seed(seed)
     transform = torchvision.transforms.Compose(
         [
@@ -134,18 +204,35 @@ def make_dummy_conv_loader(
 
 
 def make_glue_module(seed: int = 0) -> nn.Module:
+    """Creates a GLUE model.
+
+    Args:
+        seed (int, optional):
+            Random seed for model initialization. Defaults to 0.
+    """
     torch.manual_seed(seed)
     return construct_model(data_name="qnli")
 
 
-def make_dummy_glue_loader(
-    batch_size: int = 1,
-    num_data: int = 16,
+def make_qnli_loader(
+    batch_size: int,
+    num_data: int,
     do_not_pad: bool = False,
     seed: int = 0,
 ) -> torch.utils.data.DataLoader:
-    torch.manual_seed(seed)
+    """Load the QNLI dataset and return the data loader.
 
+    Args:
+        batch_size (int):
+            Batch size for the data loader.
+        num_data (int):
+            Size of the synthetic dataset.
+        do_not_pad (bool, optional):
+            If set, avoids padding batches for Transformer-based models. Defaults to False.
+        seed (int, optional):
+            Random seed for dataset generation. Defaults to 0.
+    """
+    torch.manual_seed(seed)
     loader = get_dataloader(
         data_name="qnli",
         batch_size=batch_size,

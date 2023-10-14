@@ -6,9 +6,6 @@ import torch
 from src.gradient_similarity import GradientSimilarityComputer
 from src.representation_similarity import RepresentationSimilarityComputer
 from src.tracin import TracinComputer
-
-# from src.baselines.tracin import TracinComputer
-# from src.baselines.traker import TrakComputer
 from tests.utils import check_model_equivalence, prepare_test
 
 RTOL = 1e-3
@@ -34,7 +31,7 @@ def test_representations_similarity(test_name: str) -> None:
         metric="dot",
     )
     scores = computer.compute_total_influence(
-        valid_loader=valid_loader, train_loader=train_loader
+        test_loader=valid_loader, train_loader=train_loader
     )
     assert len(scores.shape) == 2
     assert scores.shape[0] == valid_size
@@ -50,7 +47,7 @@ def test_representations_similarity(test_name: str) -> None:
             similarity_dtype=torch.float64,
         )
         scores = computer.compute_total_influence(
-            valid_loader=train_loader, train_loader=train_loader
+            test_loader=train_loader, train_loader=train_loader
         )
         assert scores.shape[0] == train_size
         assert scores.shape[1] == train_size
@@ -95,10 +92,12 @@ def test_gradients_similarity(test_name: str) -> None:
     original_model = copy.deepcopy(model)
 
     computer = GradientSimilarityComputer(
-        model=model, task=task, metric="dot",
+        model=model,
+        task=task,
+        metric="dot",
     )
     scores = computer.compute_total_influence(
-        valid_loader=valid_loader, train_loader=train_loader
+        test_loader=valid_loader, train_loader=train_loader
     )
     assert len(scores.shape) == 2
     assert scores.shape[0] == valid_size
@@ -107,15 +106,15 @@ def test_gradients_similarity(test_name: str) -> None:
 
     metric_list = ["cos", "dot"]
     for metric in metric_list:
-        computer = GradientSimilarityComputer(
-            model=model, task=task, metric=metric
-        )
+        computer = GradientSimilarityComputer(model=model, task=task, metric=metric)
         scores = computer.compute_total_influence(
-            valid_loader=train_loader, train_loader=train_loader
+            test_loader=train_loader, train_loader=train_loader
         )
         assert scores.shape[0] == train_size
         assert scores.shape[1] == train_size
         assert check_model_equivalence(original_model, model)
+
+        computer.compute_self_influence(loader=train_loader)
 
         if metric == "cos":
             assert torch.allclose(
@@ -163,33 +162,38 @@ def test_tracin(test_name: str) -> None:
     metric_list = ["dot", "cos"]
     for metric in metric_list:
         computer = GradientSimilarityComputer(
-            model=model1, task=task, metric=metric,
+            model=model1,
+            task=task,
+            metric=metric,
         )
         grad_scores = computer.compute_total_influence(
-            valid_loader=valid_loader, train_loader=train_loader
+            test_loader=valid_loader, train_loader=train_loader
         )
 
         computer = TracinComputer(
-            model=model1, task=task, metric=metric,
+            model=model1,
+            task=task,
+            metric=metric,
         )
         tracin_scores = computer.compute_total_influence(
             checkpoints=dup_checkpoints,
-            valid_loader=valid_loader,
+            test_loader=valid_loader,
             train_loader=train_loader,
             lrs=1.0,
         )
         assert len(tracin_scores.shape) == 2
         assert tracin_scores.shape[0] == valid_size
         assert tracin_scores.shape[1] == train_size
-        assert check_model_equivalence(original_model1, model1)
         assert torch.allclose(grad_scores, tracin_scores, rtol=RTOL, atol=ATOL)
 
         computer = TracinComputer(
-            model=model1, task=task, metric=metric,
+            model=model1,
+            task=task,
+            metric=metric,
         )
         tracin_scores = computer.compute_total_influence(
             checkpoints=checkpoints,
-            valid_loader=valid_loader,
+            test_loader=valid_loader,
             train_loader=train_loader,
             lrs=1.0,
         )

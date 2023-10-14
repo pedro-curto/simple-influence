@@ -69,7 +69,8 @@ def main(data_name: str, num_train: int = 50) -> None:
     os.makedirs("../files/checkpoints", exist_ok=True)
 
     train_loader, _, valid_loader = get_loaders(
-        data_name=data_name, eval_batch_size=512,
+        data_name=data_name,
+        eval_batch_size=512,
     )
     hyper_dict = get_hyperparameters(data_name)
     lr = hyper_dict["lr"]

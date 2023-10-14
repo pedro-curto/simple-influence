@@ -10,9 +10,9 @@ from examples.regression.pipeline import (
 )
 from examples.regression.task import RegressionTask
 from src.gradient_similarity import GradientSimilarityComputer
+from src.influence_function import InfluenceFunctionComputer
 from src.representation_similarity import RepresentationSimilarityComputer
 from src.tracin import TracinComputer
-from src.influence_function import InfluenceFunctionComputer
 
 TASK = "regression"
 BASE_PATH = "files/results"
@@ -42,27 +42,29 @@ def prepare_everything(data_name: str, model_id: int = 0):
 
 
 def get_single_trajectory_checkpoints(
-    data_name: str, model_id: int = 0,
+    data_name: str,
+    model_id: int = 0,
 ):
     epoch_list = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
     assert len(epoch_list) == 10
 
     checkpoints = []
     for epoch in epoch_list:
-        checkpoints.append(
-            f"files/checkpoints/{model_id}/{data_name}_epoch_{epoch}.pt"
-        )
+        checkpoints.append(f"files/checkpoints/{model_id}/{data_name}_epoch_{epoch}.pt")
     return checkpoints
 
 
 def compute_reps_similarity(data_name: str, model_ids: List[int]) -> None:
     for mid in model_ids:
         model, eval_train_loader, valid_loader, task = prepare_everything(
-            data_name=data_name, model_id=mid,
+            data_name=data_name,
+            model_id=mid,
         )
 
         computer = RepresentationSimilarityComputer(
-            model=model, task=task, metric="l2",
+            model=model,
+            task=task,
+            metric="l2",
         )
         scores = computer.compute_total_influence(
             valid_loader=valid_loader, train_loader=eval_train_loader
@@ -71,7 +73,9 @@ def compute_reps_similarity(data_name: str, model_ids: List[int]) -> None:
         torch.save(scores, f"{BASE_PATH}/{mid}/{expt_name}.pt")
 
         computer = RepresentationSimilarityComputer(
-            model=model, task=task, metric="cos",
+            model=model,
+            task=task,
+            metric="cos",
         )
         scores = computer.compute_total_influence(
             valid_loader=valid_loader, train_loader=eval_train_loader
@@ -89,7 +93,9 @@ def compute_grads_similarity(
         )
 
         computer = GradientSimilarityComputer(
-            model=model, task=task, metric="dot",
+            model=model,
+            task=task,
+            metric="dot",
         )
         scores = computer.compute_total_influence(
             valid_loader=valid_loader, train_loader=eval_train_loader
@@ -98,7 +104,9 @@ def compute_grads_similarity(
         torch.save(scores, f"{BASE_PATH}/{mid}/{expt_name}.pt")
 
         computer = GradientSimilarityComputer(
-            model=model, task=task, metric="cos",
+            model=model,
+            task=task,
+            metric="cos",
         )
         scores = computer.compute_total_influence(
             valid_loader=valid_loader, train_loader=eval_train_loader
@@ -110,7 +118,8 @@ def compute_grads_similarity(
 def compute_if(data_name: str, model_ids: List[int], do_corrupt: bool = False) -> None:
     for mid in model_ids:
         model, eval_train_loader, valid_loader, task = prepare_everything(
-            data_name=data_name, model_id=mid,
+            data_name=data_name,
+            model_id=mid,
         )
 
         ekfac = InfluenceFunctionComputer(
@@ -134,10 +143,12 @@ def compute_tracin(
 
     for mid in model_ids:
         model, eval_train_loader, valid_loader, task = prepare_everything(
-            data_name=data_name, model_id=mid,
+            data_name=data_name,
+            model_id=mid,
         )
         checkpoints = get_single_trajectory_checkpoints(
-            data_name=data_name, model_id=mid,
+            data_name=data_name,
+            model_id=mid,
         )
 
         computer = TracinComputer(model, task=task, metric="dot")

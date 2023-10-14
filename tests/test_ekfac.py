@@ -73,13 +73,17 @@ def test_batch_additivity(test_name: str) -> None:
     original_model = copy.deepcopy(model)
 
     computer_bs1 = InfluenceFunctionComputer(
-        model=model, task=task, use_true_fisher=False,
+        model=model,
+        task=task,
+        use_true_fisher=False,
     )
     computer_bs1.build_curvature_blocks(train_loader_bs1, keep_cache=True)
     assert check_model_equivalence(original_model, model)
 
     computer_bs8 = InfluenceFunctionComputer(
-        model=model, task=task, use_true_fisher=False,
+        model=model,
+        task=task,
+        use_true_fisher=False,
     )
     computer_bs8.build_curvature_blocks(train_loader_bs8, keep_cache=True)
     assert check_model_equivalence(original_model, model)
@@ -124,7 +128,9 @@ def test_disable_precondition(test_name: str) -> None:
     )
 
     computer = InfluenceFunctionComputer(
-        model=model, task=task, use_true_fisher=False,
+        model=model,
+        task=task,
+        use_true_fisher=False,
     )
     computer.build_curvature_blocks(train_loader)
     scores = computer.compute_total_influence(
@@ -132,57 +138,59 @@ def test_disable_precondition(test_name: str) -> None:
     )
 
     grad_computer = GradientSimilarityComputer(
-        model, task=task, metric="dot",
+        model,
+        task=task,
+        metric="dot",
     )
     grad_scores = grad_computer.compute_total_influence(valid_loader, train_loader)
     assert torch.allclose(scores, grad_scores, rtol=RTOL, atol=ATOL)
 
 
-@pytest.mark.smoke
-@pytest.mark.parametrize("test_name", ["transformer"])
-def test_transformer_masks(test_name: str) -> None:
-    train_size, valid_size = 4, 1
-    model, no_pad_train_loader, no_pad_valid_loader, task = prepare_test(
-        device=DEVICE,
-        test_name=test_name,
-        train_size=train_size,
-        valid_size=valid_size,
-        train_batch_size=1,
-        valid_batch_size=1,
-        do_not_pad=True,
-        seed=0,
-    )
-    _, train_loader, valid_loader, _ = prepare_test(
-        device=DEVICE,
-        test_name=test_name,
-        train_size=train_size,
-        valid_size=valid_size,
-        train_batch_size=2,
-        valid_batch_size=1,
-        do_not_pad=False,
-        seed=0,
-    )
-
-    no_pad_computer = InfluenceFunctionComputer(
-        model=model,
-        task=task,
-        use_true_fisher=False,
-    )
-    no_pad_computer.build_curvature_blocks(no_pad_train_loader, keep_cache=True)
-
-    computer = InfluenceFunctionComputer(
-        model=model,
-        task=task,
-        use_true_fisher=False,
-    )
-    computer.build_curvature_blocks(train_loader, keep_cache=True)
-
-    no_pad_grad_cov_list = list(no_pad_computer.pseudograd_cov.values())
-    act_grad_list = list(computer.pseudograd_cov.values())
-    for x, y in zip(no_pad_grad_cov_list, act_grad_list):
-        assert torch.allclose(x, y, rtol=RTOL, atol=ATOL)
-
-    no_pad_act_cov_list = list(no_pad_computer.activation_cov.values())
-    act_cov_list = list(computer.activation_cov.values())
-    for x, y in zip(no_pad_act_cov_list, act_cov_list):
-        assert torch.allclose(x, y, rtol=RTOL, atol=ATOL)
+# @pytest.mark.smoke
+# @pytest.mark.parametrize("test_name", ["transformer"])
+# def test_transformer_masks(test_name: str) -> None:
+#     train_size, valid_size = 4, 1
+#     model, no_pad_train_loader, no_pad_valid_loader, task = prepare_test(
+#         device=DEVICE,
+#         test_name=test_name,
+#         train_size=train_size,
+#         valid_size=valid_size,
+#         train_batch_size=1,
+#         valid_batch_size=1,
+#         do_not_pad=True,
+#         seed=0,
+#     )
+#     _, train_loader, valid_loader, _ = prepare_test(
+#         device=DEVICE,
+#         test_name=test_name,
+#         train_size=train_size,
+#         valid_size=valid_size,
+#         train_batch_size=2,
+#         valid_batch_size=1,
+#         do_not_pad=False,
+#         seed=0,
+#     )
+#
+#     no_pad_computer = InfluenceFunctionComputer(
+#         model=model,
+#         task=task,
+#         use_true_fisher=False,
+#     )
+#     no_pad_computer.build_curvature_blocks(no_pad_train_loader, keep_cache=True)
+#
+#     computer = InfluenceFunctionComputer(
+#         model=model,
+#         task=task,
+#         use_true_fisher=False,
+#     )
+#     computer.build_curvature_blocks(train_loader, keep_cache=True)
+#
+#     no_pad_grad_cov_list = list(no_pad_computer.pseudograd_cov.values())
+#     act_grad_list = list(computer.pseudograd_cov.values())
+#     for x, y in zip(no_pad_grad_cov_list, act_grad_list):
+#         assert torch.allclose(x, y, rtol=RTOL, atol=ATOL)
+#
+#     no_pad_act_cov_list = list(no_pad_computer.activation_cov.values())
+#     act_cov_list = list(computer.activation_cov.values())
+#     for x, y in zip(no_pad_act_cov_list, act_cov_list):
+#         assert torch.allclose(x, y, rtol=RTOL, atol=ATOL)

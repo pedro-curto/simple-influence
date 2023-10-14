@@ -1,19 +1,21 @@
 import pytest
+import torch
 
 from tests.utils import (
+    make_dummy_classification_loader,
     make_dummy_conv_bn_module,
-    make_dummy_conv_loader,
     make_dummy_conv_module,
-    make_dummy_glue_loader,
-    make_dummy_linear_loader,
-    make_dummy_linear_module,
+    make_dummy_mlp_module,
+    make_dummy_regression_loader,
     make_glue_module,
+    make_qnli_loader,
 )
 
 
-def test_linear() -> None:
-    loader = make_dummy_linear_loader(batch_size=1)
-    model = make_dummy_linear_module()
+def test_mlp() -> None:
+    # Test "mlp" test scenario.
+    loader = make_dummy_regression_loader(batch_size=1, num_data=8)
+    model = make_dummy_mlp_module()
 
     inputs, targets = next(iter(loader))
     outputs = model(inputs)
@@ -21,7 +23,8 @@ def test_linear() -> None:
 
 
 def test_conv() -> None:
-    loader = make_dummy_conv_loader(batch_size=1)
+    # Test "conv" test scenario.
+    loader = make_dummy_classification_loader(batch_size=1, num_data=8)
     model = make_dummy_conv_module()
 
     inputs, targets = next(iter(loader))
@@ -30,7 +33,8 @@ def test_conv() -> None:
 
 
 def test_conv_bn() -> None:
-    loader = make_dummy_conv_loader(batch_size=1)
+    # Test "conv_bn" test scenario.
+    loader = make_dummy_classification_loader(batch_size=1, num_data=8)
     model = make_dummy_conv_bn_module()
 
     inputs, targets = next(iter(loader))
@@ -38,8 +42,10 @@ def test_conv_bn() -> None:
     assert outputs is not None
 
 
-def test_transformer() -> None:
-    loader = make_dummy_glue_loader(batch_size=1)
+@pytest.mark.smoke
+def test_glue() -> None:
+    # Test "glue" test scenario.
+    loader = make_qnli_loader(batch_size=1, num_data=8)
     model = make_glue_module()
 
     batch = next(iter(loader))
@@ -48,15 +54,12 @@ def test_transformer() -> None:
     )
     assert outputs is not None
 
+    loader = make_qnli_loader(batch_size=1, num_data=8, do_not_pad=True)
+    batch = next(iter(loader))
+    no_pad_outputs = model(
+        batch["input_ids"], batch["token_type_ids"], batch["attention_mask"]
+    )
+    assert no_pad_outputs is not None
 
-@pytest.mark.smoke
-def test_transformer_with_no_padding() -> None:
-    loader = make_dummy_glue_loader(batch_size=1, do_not_pad=True)
-
-    data_iter = iter(loader)
-    batch1 = next(data_iter)
-    batch2 = next(data_iter)
-
-    assert batch1["input_ids"].shape[1] != batch2["input_ids"].shape[1]
-    assert batch1["attention_mask"].sum() == batch1["attention_mask"].shape[1]
-    assert batch2["attention_mask"].sum() == batch2["attention_mask"].shape[1]
+    # When `batch_size = 1`, the outputs should be the same with and w/o padding.
+    assert torch.allclose(outputs, no_pad_outputs)
