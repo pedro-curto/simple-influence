@@ -58,7 +58,9 @@ class InfluenceFunctionComputer(AbstractComputer):
         self.use_true_fisher = use_true_fisher
 
         # List of attributes to navigate modules.
-        self._module_to_name = {v: k for k, v in dict(self.model.named_modules()).items()}
+        self._module_to_name = {
+            v: k for k, v in dict(self.model.named_modules()).items()
+        }
         self.modules = []
         self.modules_name = []
         # Modules, where influences are computed using EK-FAC (e.g., Linear, Conv2d).
@@ -225,7 +227,9 @@ class InfluenceFunctionComputer(AbstractComputer):
                 after performing the eigendecomposition. Defaults to True to save memory.
         """
         if self._eigendecompositon_done:
-            self.logger.info("Eigendecomposition computation is already done. Skipping.")
+            self.logger.info(
+                "Eigendecomposition computation is already done. Skipping."
+            )
             return
 
         t1 = time.time()
@@ -336,10 +340,13 @@ class InfluenceFunctionComputer(AbstractComputer):
                 Dataloader in which additional factors are computed for.
         """
         if self._additional_factors_done:
-            self.logger.info("Additional factors computation is already done. Skipping.")
+            self.logger.info(
+                "Additional factors computation is already done. Skipping."
+            )
             return
 
         t2 = time.time()
+
         def compute_loss(_params, _buffers, _batch):
             return self.task.get_train_loss(
                 model=self.model,
@@ -514,7 +521,10 @@ class InfluenceFunctionComputer(AbstractComputer):
         return grads_dict
 
     def _get_precond_grads_dict(
-        self, batch, use_measurement: bool = False, disable_precondition: bool = False,
+        self,
+        batch,
+        use_measurement: bool = False,
+        disable_precondition: bool = False,
     ) -> Dict[str, torch.Tensor]:
         """Given a batch, compute the individual gradient, reshape it into a 2D matrix, and apply preconditioning."""
         batch_size = self.task.get_batch_size(batch)
@@ -640,9 +650,7 @@ class InfluenceFunctionComputer(AbstractComputer):
         return score_table
 
     def compute_self_scores_with_loader(
-            self,
-            loader: torch.utils.data.DataLoader,
-            disable_precondition: bool = False
+        self, loader: torch.utils.data.DataLoader, disable_precondition: bool = False
     ) -> torch.Tensor:
         """Compute self-influence scores of all data points in `loader`.
 
