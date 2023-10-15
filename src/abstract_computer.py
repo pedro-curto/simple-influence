@@ -100,7 +100,6 @@ class AbstractComputer(ABC):
             model=self.model,
             batch=batch,
             parameter_and_buffer_dicts=(params, buffers),
-            sample=False,
             reduction="sum",
         )
 

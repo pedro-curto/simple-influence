@@ -66,7 +66,7 @@ def compute_reps_similarity(data_name: str, model_ids: List[int]) -> None:
             task=task,
             metric="l2",
         )
-        scores = computer.compute_total_influence(
+        scores = computer.compute_scores_with_loader(
             test_loader=valid_loader, train_loader=eval_train_loader
         )
         expt_name = f"{data_name}_representations_similarity_l2"
@@ -77,7 +77,7 @@ def compute_reps_similarity(data_name: str, model_ids: List[int]) -> None:
             task=task,
             metric="cos",
         )
-        scores = computer.compute_total_influence(
+        scores = computer.compute_scores_with_loader(
             test_loader=valid_loader, train_loader=eval_train_loader
         )
         expt_name = f"{data_name}_representations_similarity_cos"
@@ -97,7 +97,7 @@ def compute_grads_similarity(
             task=task,
             metric="dot",
         )
-        scores = computer.compute_total_influence(
+        scores = computer.compute_scores_with_loader(
             test_loader=valid_loader, train_loader=eval_train_loader
         )
         expt_name = f"{data_name}_gradients_similarity_dot"
@@ -108,7 +108,7 @@ def compute_grads_similarity(
             task=task,
             metric="cos",
         )
-        scores = computer.compute_total_influence(
+        scores = computer.compute_scores_with_loader(
             test_loader=valid_loader, train_loader=eval_train_loader
         )
         expt_name = f"{data_name}_gradients_similarity_cos"
@@ -128,8 +128,8 @@ def compute_if(data_name: str, model_ids: List[int], do_corrupt: bool = False) -
             n_epoch=1,
         )
         ekfac.build_curvature_blocks(eval_train_loader)
-        scores = ekfac.compute_total_influence(
-            valid_loader=valid_loader, train_loader=eval_train_loader
+        scores = ekfac.compute_scores_with_loader(
+            test_loader=valid_loader, train_loader=eval_train_loader
         )
         expt_name = f"{data_name}_if"
         torch.save(scores, f"{BASE_PATH}/{mid}/{expt_name}.pt")
@@ -152,7 +152,7 @@ def compute_tracin(
         )
 
         computer = TracinComputer(model, task=task, metric="dot")
-        scores = computer.compute_total_influence(
+        scores = computer.compute_scores_with_loader(
             checkpoints=checkpoints,
             lrs=lr,
             test_loader=valid_loader,
@@ -162,7 +162,7 @@ def compute_tracin(
         torch.save(scores, f"{BASE_PATH}/{mid}/{expt_name}.pt")
 
         computer = TracinComputer(model, task=task, metric="cos")
-        scores = computer.compute_total_influence(
+        scores = computer.compute_scores_with_loader(
             checkpoints=checkpoints,
             lrs=lr,
             test_loader=valid_loader,

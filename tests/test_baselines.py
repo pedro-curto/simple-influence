@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from src.gradient_similarity import GradientSimilarityComputer
+from src.influence_function import InfluenceFunctionComputer
 from src.representation_similarity import RepresentationSimilarityComputer
 from src.tracin import TracinComputer
 from tests.utils import check_model_equivalence, prepare_test
@@ -30,7 +31,7 @@ def test_representations_similarity(test_name: str) -> None:
         task=task,
         metric="dot",
     )
-    scores = computer.compute_total_influence(
+    scores = computer.compute_scores_with_loader(
         test_loader=valid_loader, train_loader=train_loader
     )
     assert len(scores.shape) == 2
@@ -44,9 +45,8 @@ def test_representations_similarity(test_name: str) -> None:
             model=model,
             task=task,
             metric=metric,
-            similarity_dtype=torch.float64,
         )
-        scores = computer.compute_total_influence(
+        scores = computer.compute_scores_with_loader(
             test_loader=train_loader, train_loader=train_loader
         )
         assert scores.shape[0] == train_size
@@ -96,7 +96,7 @@ def test_gradients_similarity(test_name: str) -> None:
         task=task,
         metric="dot",
     )
-    scores = computer.compute_total_influence(
+    scores = computer.compute_scores_with_loader(
         test_loader=valid_loader, train_loader=train_loader
     )
     assert len(scores.shape) == 2
@@ -107,14 +107,9 @@ def test_gradients_similarity(test_name: str) -> None:
     metric_list = ["cos", "dot"]
     for metric in metric_list:
         computer = GradientSimilarityComputer(model=model, task=task, metric=metric)
-        scores = computer.compute_total_influence(
+        scores = computer.compute_scores_with_loader(
             test_loader=train_loader, train_loader=train_loader
         )
-        assert scores.shape[0] == train_size
-        assert scores.shape[1] == train_size
-        assert check_model_equivalence(original_model, model)
-
-        computer.compute_self_influence(loader=train_loader)
 
         if metric == "cos":
             assert torch.allclose(
@@ -125,6 +120,9 @@ def test_gradients_similarity(test_name: str) -> None:
             )
 
         if metric == "dot":
+            self_scores = computer.compute_self_score_with_loader(loader=train_loader)
+            assert torch.allclose(self_scores, torch.diag(scores), rtol=RTOL, atol=ATOL)
+
             assert not torch.allclose(
                 torch.diag(scores),
                 torch.ones((train_size,), device=DEVICE),
@@ -166,7 +164,7 @@ def test_tracin(test_name: str) -> None:
             task=task,
             metric=metric,
         )
-        grad_scores = computer.compute_total_influence(
+        grad_scores = computer.compute_scores_with_loader(
             test_loader=valid_loader, train_loader=train_loader
         )
 
@@ -175,7 +173,7 @@ def test_tracin(test_name: str) -> None:
             task=task,
             metric=metric,
         )
-        tracin_scores = computer.compute_total_influence(
+        tracin_scores = computer.compute_scores_with_loader(
             checkpoints=dup_checkpoints,
             test_loader=valid_loader,
             train_loader=train_loader,
@@ -191,7 +189,7 @@ def test_tracin(test_name: str) -> None:
             task=task,
             metric=metric,
         )
-        tracin_scores = computer.compute_total_influence(
+        tracin_scores = computer.compute_scores_with_loader(
             checkpoints=checkpoints,
             test_loader=valid_loader,
             train_loader=train_loader,
@@ -199,3 +197,40 @@ def test_tracin(test_name: str) -> None:
         )
         assert not torch.allclose(grad_scores, tracin_scores, rtol=RTOL, atol=ATOL)
         assert check_model_equivalence(original_model1, model1)
+
+
+@pytest.mark.parametrize("test_name", ["mlp", "conv", "conv_bn"])
+def test_influence_function(test_name: str) -> None:
+    train_size, valid_size = 32, 16
+    model, train_loader, valid_loader, task = prepare_test(
+        device=DEVICE,
+        test_name=test_name,
+        train_size=train_size,
+        valid_size=valid_size,
+        seed=0,
+    )
+    original_model = copy.deepcopy(model)
+
+    computer = InfluenceFunctionComputer(
+        model=model,
+        task=task,
+    )
+    computer.build_curvature_blocks(loader=train_loader)
+    scores = computer.compute_scores_with_loader(
+        test_loader=valid_loader, train_loader=train_loader
+    )
+    assert len(scores.shape) == 2
+    assert scores.shape[0] == valid_size
+    assert scores.shape[1] == train_size
+    assert check_model_equivalence(original_model, model)
+
+    computer = InfluenceFunctionComputer(
+        model=model,
+        task=task,
+    )
+    computer.build_curvature_blocks(loader=train_loader)
+    scores = computer.compute_scores_with_loader(
+        test_loader=train_loader, train_loader=train_loader
+    )
+    self_scores = computer.compute_self_scores_with_loader(loader=train_loader)
+    assert torch.allclose(self_scores, torch.diag(scores), rtol=RTOL, atol=ATOL)

@@ -1,5 +1,5 @@
 import time
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 from torch import nn
@@ -7,10 +7,10 @@ from torch import nn
 from src.abstract_computer import AbstractComputer
 from src.abstract_task import AbstractTask
 from src.ekfac_utils import (
-    ActivationHandler,
-    GradientHandler,
     InvalidModuleError,
-    make_grad_dict_to_matrix,
+    extract_activations,
+    extract_gradients,
+    make_grads_dict_to_matrix,
 )
 
 
@@ -27,8 +27,6 @@ class InfluenceFunctionComputer(AbstractComputer):
         damping: Optional[float] = None,
         n_epoch: int = 1,
         use_true_fisher: bool = True,
-        cov_dtype: torch.dtype = torch.float32,
-        grads_dtype: torch.dtype = torch.float32,
     ) -> None:
         """Initializes the `InfluenceFunctionComputer` class.
 
@@ -49,31 +47,21 @@ class InfluenceFunctionComputer(AbstractComputer):
             use_true_fisher (bool, optional):
                 If set to True, targets are sampled from the outputs. If set to False, the
                 empirical Fisher is used, and the targets are set to the true targets. Default is True.
-            cov_dtype (dtype, optional):
-                Specifies the dtype for storing covariance statistics. Defaults to torch.float32.
-            grads_dtype (dtype, optional):
-                Specifies the dtype for computing preconditioning. Defaults to torch.float32.
         """
-        super().__init__(model, task)
+        super().__init__(model=model, task=task, logger_name=self.__class__.__name__)
+
         self.func_params = dict(self.model.named_parameters())
         self.func_buffers = dict(self.model.named_buffers())
 
         self.damping = damping
         self.n_epoch = n_epoch
         self.use_true_fisher = use_true_fisher
-        self.cov_dtype = cov_dtype
-        self.grads_dtype = grads_dtype
-
-        # Define activation and gradients handler.
-        self._activation_handler = ActivationHandler()
-        self._gradient_handler = GradientHandler()
 
         # List of attributes to navigate modules.
-        self._name_to_module = dict(self.model.named_modules())
-        self._module_to_name = {v: k for k, v in self._name_to_module.items()}
+        self._module_to_name = {v: k for k, v in dict(self.model.named_modules()).items()}
         self.modules = []
         self.modules_name = []
-        # Modules, where influnece are computed using EK-FAC (e.g., Linear, Conv2d).
+        # Modules, where influences are computed using EK-FAC (e.g., Linear, Conv2d).
         self.kronecker_modules_name = []
         # Modules, where influences are computed using the full Fisher (e.g., LayerNorm2d).
         self.full_modules_name = []
@@ -88,10 +76,16 @@ class InfluenceFunctionComputer(AbstractComputer):
         self.damping_factors = {}
         self._activation_masks = None
 
+        # Flags to indicate which computation has already finished.
+        self._covariance_done = False
+        self._eigendecompositon_done = False
+        self._additional_factors_done = False
+
         self._handles = []
         self.initialize()
 
     def initialize(self) -> None:
+        """Initializes all hooks and save module mappings."""
         for name, module in self.model.named_modules():
             classname = module.__class__.__name__
 
@@ -131,17 +125,20 @@ class InfluenceFunctionComputer(AbstractComputer):
             raise AttributeError(error_msg)
 
     def _forward_hook(self, module: nn.Module, inputs: Tuple[torch.Tensor]) -> None:
+        """Computes the pre-activation covariance matrices."""
         assert len(inputs) == 1
 
         with torch.no_grad():
             module_name = self._module_to_name[module]
-            acts = self._activation_handler.extract_activations(
-                inputs[0].data.to(dtype=self.cov_dtype), module, self._activation_masks
-            ).to(dtype=self.cov_dtype)
+            acts = extract_activations(
+                inputs[0].data.to(dtype=self.stats_dtype),
+                module,
+                self._activation_masks,
+            ).to(dtype=self.stats_dtype)
             if module_name not in self.activation_cov:
                 last_dim = acts.shape[-1]
                 self.activation_cov[module_name] = torch.zeros(
-                    (last_dim, last_dim), dtype=self.cov_dtype, device=acts.device
+                    (last_dim, last_dim), dtype=self.stats_dtype, device=acts.device
                 )
             self.activation_cov[module_name].addmm_(acts.t(), acts)
 
@@ -151,19 +148,20 @@ class InfluenceFunctionComputer(AbstractComputer):
         grad_inputs: Tuple[torch.Tensor],
         grad_outputs: Tuple[torch.Tensor],
     ) -> None:
+        """Computes the pseudo-gradient covariance matrices."""
         del grad_inputs
         assert len(grad_outputs) == 1
 
         with torch.no_grad():
             module_name = self._module_to_name[module]
-            pseudograds = self._gradient_handler(
-                grad_outputs[0].data.to(dtype=self.cov_dtype), module
-            ).to(dtype=self.cov_dtype)
+            pseudograds = extract_gradients(
+                grad_outputs[0].data.to(dtype=self.stats_dtype), module
+            ).to(dtype=self.stats_dtype)
             if module_name not in self.pseudograd_cov:
                 last_dim = pseudograds.shape[-1]
                 self.pseudograd_cov[module_name] = torch.zeros(
                     (last_dim, last_dim),
-                    dtype=self.cov_dtype,
+                    dtype=self.stats_dtype,
                     device=pseudograds.device,
                 )
             self.pseudograd_cov[module_name].addmm_(pseudograds.t(), pseudograds)
@@ -181,8 +179,17 @@ class InfluenceFunctionComputer(AbstractComputer):
         loss.backward()
 
     def fit_covariances(self, loader: torch.utils.data.DataLoader) -> None:
-        t0 = time.time()
+        """Fit the pre-activation and pseudo-gradient covariance matrices given the loader.
 
+        Args:
+            loader (DataLoader):
+                Dataloader in which covariances are computed for.
+        """
+        if self._covariance_done:
+            self.logger.info("Covariance computation is already done. Skipping.")
+            return
+
+        t0 = time.time()
         self.model.eval()
         examples_seen = 0
         for _ in range(self.n_epoch):
@@ -195,6 +202,7 @@ class InfluenceFunctionComputer(AbstractComputer):
                 examples_seen += self.task.get_batch_size(batch)
 
         with torch.no_grad():
+            # Normalize the covariances by the number of data points.
             for name in self.kronecker_modules_name:
                 self.activation_cov[name] /= examples_seen
                 self.activation_cov[name] = self.activation_cov[name].to(
@@ -204,12 +212,23 @@ class InfluenceFunctionComputer(AbstractComputer):
                 self.pseudograd_cov[name] = self.pseudograd_cov[name].to(
                     self.grads_dtype
                 )
+        self._covariance_done = True
         self.logger.info(f"Seen {examples_seen} examples.")
         self.logger.info(f"Time for computing covariances: {time.time() - t0}")
 
     def fit_eigendecompositions(self, keep_cache: bool = False) -> None:
-        t1 = time.time()
+        """Compute eigendecomposition of all covariances.
 
+        Args:
+            keep_cache (bool):
+                If true, delete the covariance matrices and eigenvalues from memory (just keeping the eigenbasis),
+                after performing the eigendecomposition. Defaults to True to save memory.
+        """
+        if self._eigendecompositon_done:
+            self.logger.info("Eigendecomposition computation is already done. Skipping.")
+            return
+
+        t1 = time.time()
         with torch.no_grad():
             for name in self.kronecker_modules_name:
                 orig_dtype = self.activation_cov[name].dtype
@@ -233,11 +252,24 @@ class InfluenceFunctionComputer(AbstractComputer):
                 if not keep_cache:
                     del self.pseudograd_cov[name]
                     del self.pseudograd_cov_eigvals[name]
+        self._eigendecompositon_done = True
         self.logger.info(f"Time for eigendecomposition: {time.time() - t1}")
 
     def compute_kronecker_lambda(
         self, module_name: str, per_batch_grads: torch.Tensor
     ) -> None:
+        """Compute the Lambda term (corrected eigenvalues) for the EK-FAC.
+
+        For details, see https://arxiv.org/pdf/2308.03296.pdf.
+
+        Args:
+            module_name (str):
+                Name of the module.
+            per_batch_grads (torch.Tensor)
+                Individual per batch gradients.
+        """
+        assert len(per_batch_grads.shape) == 3
+
         if module_name not in self.kronecker_eigvals:
             self.kronecker_eigvals[module_name] = torch.zeros(
                 (per_batch_grads.shape[1], per_batch_grads.shape[2]),
@@ -258,6 +290,15 @@ class InfluenceFunctionComputer(AbstractComputer):
     def compute_full_factors(
         self, module_name: str, per_batch_grads: torch.Tensor
     ) -> None:
+        """Compute the full Fisher given the `module_name`.
+
+        Args:
+            module_name (str):
+                Name of the module.
+            per_batch_grads (torch.Tensor)
+                Individual per batch gradients.
+        """
+        assert len(per_batch_grads.shape) == 2
         if module_name not in self.full_factors:
             last_dim = per_batch_grads.shape[1]
             self.full_factors[module_name] = torch.zeros(
@@ -270,6 +311,15 @@ class InfluenceFunctionComputer(AbstractComputer):
     def compute_diag_lambda(
         self, module_name: str, per_batch_grads: torch.Tensor
     ) -> None:
+        """Compute the diagonal Fisher given the `module_name`.
+
+        Args:
+            module_name (str):
+                Name of the module.
+            per_batch_grads (torch.Tensor)
+                Individual per batch gradients.
+        """
+        assert len(per_batch_grads.shape) == 3
         if module_name not in self.diag_factors:
             self.diag_factors[module_name] = torch.zeros(
                 (per_batch_grads.shape[1], per_batch_grads.shape[2]),
@@ -279,8 +329,17 @@ class InfluenceFunctionComputer(AbstractComputer):
         self.diag_factors[module_name].add_(torch.square(per_batch_grads).sum(dim=0))
 
     def fit_additional_factors(self, loader: torch.utils.data.DataLoader) -> None:
-        t2 = time.time()
+        """Fit additional factors (e.g., Lambda, full Fisher, and diagonal Fisher) given the loader.
 
+        Args:
+            loader (DataLoader):
+                Dataloader in which additional factors are computed for.
+        """
+        if self._additional_factors_done:
+            self.logger.info("Additional factors computation is already done. Skipping.")
+            return
+
+        t2 = time.time()
         def compute_loss(_params, _buffers, _batch):
             return self.task.get_train_loss(
                 model=self.model,
@@ -306,17 +365,20 @@ class InfluenceFunctionComputer(AbstractComputer):
                 with torch.no_grad():
                     for name, module in zip(self.modules_name, self.modules):
                         if name in self.kronecker_modules_name:
-                            per_batch_grads = make_grad_dict_to_matrix(
+                            # Compute the Lambda on K-FAC eigenbasis.
+                            per_batch_grads = make_grads_dict_to_matrix(
                                 module, name, grads_dict
                             ).to(dtype=self.grads_dtype)
                             self.compute_kronecker_lambda(name, per_batch_grads)
                         elif name in self.full_modules_name:
-                            per_batch_grads = make_grad_dict_to_matrix(
+                            # Compute the full Fisher.
+                            per_batch_grads = make_grads_dict_to_matrix(
                                 module, name, grads_dict
                             ).to(dtype=self.grads_dtype)
                             self.compute_full_factors(name, per_batch_grads)
                         elif name in self.diag_modules_name:
-                            per_batch_grads = make_grad_dict_to_matrix(
+                            # Compute the diagonal Fisher.
+                            per_batch_grads = make_grads_dict_to_matrix(
                                 module, name, grads_dict
                             ).to(dtype=self.grads_dtype)
                             self.compute_diag_lambda(name, per_batch_grads)
@@ -324,6 +386,7 @@ class InfluenceFunctionComputer(AbstractComputer):
                             raise InvalidModuleError()
 
         with torch.no_grad():
+            # Normalize the statistics by the number of data points and set up the damping term.
             for name in self.kronecker_modules_name:
                 self.kronecker_eigvals[name] /= examples_seen
                 self.kronecker_eigvals[name] = self.kronecker_eigvals[name].to(
@@ -343,13 +406,13 @@ class InfluenceFunctionComputer(AbstractComputer):
                     self.full_factors[name].to(dtype=self.eig_dtype)
                 )
                 if self.damping is None:
-                    # Use the heuristic approach where we set damping to be.
-                    self.damping_factors[name] = 0.01 * torch.mean(eigvals).to(
+                    self.damping_factors[name] = 0.1 * torch.mean(eigvals).to(
                         dtype=self.grads_dtype
                     )
                 else:
                     self.damping_factors[name] = self.damping
 
+                # Invert the full Fisher matrix and apply damping.
                 inv_eigvals = eigvals + self.damping_factors[name]
                 self.full_factors[name] = torch.matmul(
                     torch.matmul(eigvecs, torch.diag(inv_eigvals)), eigvecs.t()
@@ -365,15 +428,26 @@ class InfluenceFunctionComputer(AbstractComputer):
                     )
                 else:
                     self.damping_factors[name] = self.damping
+
+        self._additional_factors_done = True
         print("Time for computing Lambda:", time.time() - t2)
 
     def build_curvature_blocks(
         self, loader: torch.utils.data.DataLoader, keep_cache: bool = False
     ) -> None:
+        """Perform EK-FAC computations.
+
+        Args:
+            loader (DataLoader):
+                Dataloader in EK-FAC factors are computed for.
+            keep_cache (bool, optional):
+                If set to False, remove all forward and backward hooks after EK-FAC.
+        """
         self.fit_covariances(loader=loader)
         self.fit_eigendecompositions(keep_cache=keep_cache)
         for handle in self._handles:
             handle.remove()
+        self._handles = []
         self.fit_additional_factors(loader=loader)
 
     def precondition_grads(
@@ -381,6 +455,14 @@ class InfluenceFunctionComputer(AbstractComputer):
         module_name: str,
         grads: torch.Tensor,
     ) -> torch.Tensor:
+        """Given the `module_name` and `grads`, apply the preconditioning.
+
+        Args:
+            module_name (str):
+                Name of the module in which gradients are computed on.
+            grads (torch.Tensor):
+                Reshaped gradients for the given module.
+        """
         if module_name in self.kronecker_modules_name:
             grads_rot = torch.matmul(
                 self.pseudograd_cov_eigvecs[module_name].t(),
@@ -403,6 +485,7 @@ class InfluenceFunctionComputer(AbstractComputer):
             )
 
         elif module_name in self.full_modules_name:
+            # Note that the Fisher is already inverted and damping is applied.
             precond_grads = torch.matmul(
                 grads.to(dtype=self.grads_dtype), self.full_factors[module_name]
             )
@@ -414,92 +497,192 @@ class InfluenceFunctionComputer(AbstractComputer):
 
         else:
             raise InvalidModuleError()
+
         return precond_grads
 
-    def compute_influence(
-        self,
-        valid_batch: Any,
-        train_batch: Any,
+    def _get_grads_dict(
+        self, batch: Any, use_measurement: bool = False
+    ) -> Dict[str, torch.Tensor]:
+        """Given a batch, compute the individual gradient and reshape it into a 2D matrix."""
+        grads_dict = torch.func.vmap(
+            self._compute_measurement_grad()
+            if use_measurement
+            else self._compute_train_loss_grad(),
+            in_dims=(None, None, 0),
+            randomness="different",
+        )(self.func_params, self.func_buffers, batch)
+        return grads_dict
+
+    def _get_precond_grads_dict(
+        self, batch, use_measurement: bool = False, disable_precondition: bool = False,
+    ) -> Dict[str, torch.Tensor]:
+        """Given a batch, compute the individual gradient, reshape it into a 2D matrix, and apply preconditioning."""
+        batch_size = self.task.get_batch_size(batch)
+        grads_dict = self._get_grads_dict(batch=batch, use_measurement=use_measurement)
+
+        with torch.no_grad():
+            precond_grads_dict = {}
+            for name, module in zip(self.modules_name, self.modules):
+                grads = make_grads_dict_to_matrix(
+                    module, name, grads_dict, remove_grads=True
+                )
+                if disable_precondition:
+                    precond_grads_dict[name] = grads.reshape(batch_size, -1).to(
+                        dtype=self.grads_dtype
+                    )
+                else:
+                    precond_grads_dict[name] = (
+                        self.precondition_grads(module_name=name, grads=grads)
+                        .reshape(batch_size, -1)
+                        .to(dtype=self.grads_dtype)
+                    )
+        del grads_dict
+        return precond_grads_dict
+
+    def compute_scores_with_batch(
+        self, batch1: Any, batch2: Any, disable_precondition: bool = False
     ) -> torch.Tensor:
+        """Compute pairwise influences scores between data points in `batch1` and `batch2`.
+
+        Args:
+            batch1 (object):
+                The first set of data points from the data loader.
+            batch2 (object):
+                The second set of data points from the data loader.
+            disable_precondition (bool, optional):
+                If set to True, assume the Hessian to be identity.
+        """
         self.model.eval()
+        precond_grads_dict1 = self._get_precond_grads_dict(
+            batch=batch1,
+            use_measurement=False,
+            disable_precondition=disable_precondition,
+        )
+        grads_dict2 = self._get_grads_dict(batch=batch2, use_measurement=False)
 
-        pass
+        with torch.no_grad():
+            batch_size = self.task.get_batch_size(batch2)
+            total_score = 0.0
 
-    def compute_total_influence(
+            for name, module in zip(self.modules_name, self.modules):
+                grads = (
+                    make_grads_dict_to_matrix(module, name, grads_dict2)
+                    .reshape(batch_size, -1)
+                    .to(dtype=self.grads_dtype)
+                )
+                if isinstance(total_score, float):
+                    total_score = torch.matmul(precond_grads_dict1[name], grads.t())
+                else:
+                    total_score.addmm_(precond_grads_dict1[name], grads.t())
+                del precond_grads_dict1[name], grads
+        return total_score
+
+    def compute_scores_with_loader(
         self,
-        valid_loader: torch.utils.data.DataLoader,
+        test_loader: torch.utils.data.DataLoader,
         train_loader: torch.utils.data.DataLoader,
         disable_precondition: bool = False,
     ) -> torch.Tensor:
+        """Compute pairwise influence scores between `test_loader` and `train_loader`.
+
+        Args:
+            test_loader (DataLoader):
+                The loader with test dataset.
+            train_loader (DataLoader):
+                The loader with training dataset.
+            disable_precondition (bool, optional):
+                If set to True, assume the Hessian to be identity.
+        """
         self.model.eval()
 
-        with torch.no_grad():
-            score_table = torch.zeros(
-                (len(valid_loader.dataset), len(train_loader.dataset)),
-                dtype=self.grads_dtype,
-                device=self.task.device,
-                requires_grad=False,
-            )
-
-        ft_compute_train_grad = torch.func.grad(self._compute_train_loss, has_aux=False)
-        ft_compute_measurement_grad = torch.func.grad(
-            self._compute_measurement, has_aux=False
+        score_table = torch.zeros(
+            (len(test_loader.dataset), len(train_loader.dataset)),
+            dtype=self.grads_dtype,
+            device=self.task.device,
+            requires_grad=False,
         )
-        num_valid_data = len(valid_loader.dataset)
 
-        num_processed_valid = 0
-        for valid_batch in valid_loader:
+        num_processed_test = 0
+        for test_batch in test_loader:
             print(
-                f"Processed {num_processed_valid} validation data points (out of {num_valid_data})."
+                f"Processed {num_processed_test} test data points (out of {len(test_loader.dataset)})."
             )
-            valid_batch_size = self.task.get_batch_size(valid_batch)
-
-            precond_query_grads_dict = {}
-            query_grads_dict = torch.func.vmap(
-                ft_compute_measurement_grad,
-                in_dims=(None, None, 0),
-                randomness="different",
-            )(self.func_params, self.func_buffers, valid_batch)
-
-            with torch.no_grad():
-                for name, module in zip(self.modules_name, self.modules):
-                    query_grads = make_grad_dict_to_matrix(
-                        module, name, query_grads_dict
-                    )
-                    if disable_precondition:
-                        precond_query_grads_dict[name] = query_grads.reshape(
-                            valid_batch_size, -1
-                        ).to(dtype=self.grads_dtype)
-                    else:
-                        precond_query_grads_dict[name] = (
-                            self.precondition_grads(name, query_grads)
-                            .reshape(valid_batch_size, -1)
-                            .to(dtype=self.grads_dtype)
-                        )
+            test_batch_size = self.task.get_batch_size(test_batch)
+            precond_test_grads_dict = self._get_precond_grads_dict(
+                batch=test_batch,
+                use_measurement=True,
+                disable_precondition=disable_precondition,
+            )
 
             num_processed_train = 0
             for train_batch in train_loader:
                 train_batch_size = self.task.get_batch_size(train_batch)
-                train_grads_dict = torch.func.vmap(
-                    ft_compute_train_grad,
-                    in_dims=(None, None, 0),
-                    randomness="different",
-                )(self.func_params, self.func_buffers, train_batch)
+                train_grads_dict = self._get_grads_dict(
+                    batch=train_batch, use_measurement=False
+                )
 
                 with torch.no_grad():
                     for name, module in zip(self.modules_name, self.modules):
                         train_grads = (
-                            make_grad_dict_to_matrix(module, name, train_grads_dict)
+                            make_grads_dict_to_matrix(module, name, train_grads_dict)
                             .reshape(train_batch_size, -1)
                             .to(dtype=self.grads_dtype)
                         )
-
-                        v_start = num_processed_valid
-                        t_start = num_processed_train
                         score_table[
-                            v_start : v_start + valid_batch_size,
-                            t_start : t_start + train_batch_size,
-                        ].addmm_(precond_query_grads_dict[name], train_grads.t())
+                            num_processed_test : num_processed_test + test_batch_size,
+                            num_processed_train : num_processed_train
+                            + train_batch_size,
+                        ].addmm_(precond_test_grads_dict[name], train_grads.t())
+                        del train_grads
                 num_processed_train += train_batch_size
-            num_processed_valid += valid_batch_size
-        return score_table.to(dtype=self.score_dtype)
+            del precond_test_grads_dict
+            num_processed_test += test_batch_size
+        return score_table
+
+    def compute_self_scores_with_loader(
+            self,
+            loader: torch.utils.data.DataLoader,
+            disable_precondition: bool = False
+    ) -> torch.Tensor:
+        """Compute self-influence scores of all data points in `loader`.
+
+        Args:
+            loader (DataLoader):
+                The loader for which self-influence scores are computed.
+            disable_precondition (bool, optional):
+                If set to True, assume the Hessian to be identity.
+        """
+        self.model.eval()
+
+        scores = []
+        for batch in loader:
+            batch_size = self.task.get_batch_size(batch)
+            current_score = torch.zeros(
+                (batch_size,),
+                dtype=self.score_dtype,
+                device=self.task.device,
+                requires_grad=False,
+            )
+            grads_dict = self._get_grads_dict(batch=batch, use_measurement=False)
+
+            with torch.no_grad():
+                for name, module in zip(self.modules_name, self.modules):
+                    grads = make_grads_dict_to_matrix(
+                        module, name, grads_dict, remove_grads=True
+                    )
+                    if disable_precondition:
+                        precond_grads = grads.reshape(batch_size, -1).to(
+                            dtype=self.grads_dtype
+                        )
+                    else:
+                        precond_grads = (
+                            self.precondition_grads(module_name=name, grads=grads)
+                            .reshape(batch_size, -1)
+                            .to(dtype=self.grads_dtype)
+                        )
+                    grads = grads.reshape(batch_size, -1).to(dtype=self.grads_dtype)
+                    current_score.add_(torch.sum(precond_grads * grads, dim=-1))
+
+                del grads_dict
+                scores.append(current_score)
+        return torch.cat(scores)

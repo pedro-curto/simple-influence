@@ -1,0 +1,25 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+        cache: 'pip' # Cache pip dependencies\.
+        cache-dependency-path: '**/setup.py'
+    - name: Install pytest
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest==7.4.2
+        pip install .[pytorch_cpu]
+    - name: Run pytest tests
+      run: |
+        pytest -vx tests/test_utils.py
+        pytest -vx tests/test_baselines.py
+        pytest -vx tests/test_ekfac.py

@@ -8,9 +8,9 @@ import torch.nn as nn
 class AbstractTask(ABC):
     """An abstract base class for Tasks.
 
-    Subclasses of this abstract class should facilitate computing TDA (Topological Data Analysis) methods
+    Subclasses of this abstract class should facilitate computing TDA (Training Data Attribution) methods
     according to specific pipelines (e.g., models, data loaders, training objectives). For practical implementations
-    of the Task class tailored to regression, classification, and language modeling, refer to the `examples/` directory.
+    of the Task class tailored to regression, classification, and language modeling, see the `examples/` directory.
     """
 
     @abstractmethod
@@ -36,7 +36,9 @@ class AbstractTask(ABC):
         self,
         model: nn.Module,
         batch: Any,
-        parameter_and_buffer_dicts: Optional[Tuple[Dict[str, torch.Tensor]]] = None,
+        parameter_and_buffer_dicts: Optional[
+            Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]
+        ] = None,
         sample: bool = False,
         reduction: str = "sum",
     ) -> torch.Tensor:
@@ -65,8 +67,9 @@ class AbstractTask(ABC):
         self,
         model: nn.Module,
         batch: Any,
-        parameter_and_buffer_dicts: Optional[Union[Dict[str, torch.Tensor]]] = None,
-        sample: bool = False,
+        parameter_and_buffer_dicts: Optional[
+            Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]
+        ] = None,
         reduction: str = "sum",
     ) -> torch.Tensor:
         """Computes the measurement (e.g., loss, margin, conditional log probability) for a given model and batch.
@@ -75,14 +78,12 @@ class AbstractTask(ABC):
 
         Args:
             model (nn.Module):
-                PyTorch model for which the training loss will be computed.
+                PyTorch model for which the measurement will be computed.
             batch (Any):
                 Batch of data sourced from the DataLoader.
             parameter_and_buffer_dicts (tuple, optional):
                 Instead of relying on the model's inherent parameters (given by `model.parameters()`),
-                specific parameters can be directly provided for loss computation.
-            sample (bool):
-                If set to True, labels are sampled from the outputs; otherwise, the actual label is used.
+                specific parameters can be directly provided for measurement computation.
             reduction (str):
                 Determines the type of output. By default, it returns the cumulative loss. To alter
                 this behavior, specify either 'average' (for the mean loss) or 'none'
@@ -120,7 +121,7 @@ class AbstractTask(ABC):
         architectures like Transformers. For architectures with a fixed input size, the standard behavior
         should be to return `None`.
 
-        Note that this function is used for masking activations during EK-FAC influence computations.
+        Note that this function is used for masking activations during the EK-FAC influence computations.
 
         Args:
             batch (Any):

@@ -24,6 +24,7 @@ def reset_seed() -> None:
 
 def clear_gpu_cache() -> None:
     """Perform garbage collection and empty GPU cache reserved by Pytorch."""
-    gc.collect()
-    torch.cuda.empty_cache()
-    torch.cuda.reset_peak_memory_stats()
+    if torch.cuda.is_available():
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()

@@ -22,21 +22,22 @@ class GradientSimilarityComputer(AbstractComputer):
 
         Args:
             model (nn.Module):
-                The PyTorch model for which representations are computed.
+                The PyTorch model for which gradient similarities are computed.
             task (AbstractTask):
                 The task for the pipeline.
             metric (str, optional):
                 The metric used to measure similarity. Supported metrics include "dot"
                 and "cos". Defaults to "dot".
         """
-        super().__init__(model=model, task=task, logger_name="")
+        super().__init__(model=model, task=task, logger_name=self.__class__.__name__)
+
         self.func_params = dict(self.model.named_parameters())
         self.func_buffers = dict(self.model.named_buffers())
 
         self.metric = metric
         if self.metric not in ["dot", "cos"]:
             error_msg = (
-                f"Not supported metric {self.metric} for `GradientSimilarityComputer`."
+                f"Not supported metric {self.metric} for `{self.__class__.__name__}`."
             )
             self.logger.error(error_msg)
             raise NotImplementedError(error_msg)
@@ -59,8 +60,7 @@ class GradientSimilarityComputer(AbstractComputer):
     def _compute_similarity(
         self, grads_dict1: Dict[str, torch.Tensor], grads_dict2: Dict[str, torch.Tensor]
     ) -> torch.Tensor:
-        """Given `grads_dict1` and `grads_dict2` which contains the dictionary with key name and value the gradients
-        (`batch_size x dim`), return the pairwise gradient similarities."""
+        """Computes the pairwise similarities between gradients in `grads_dict1` and `grads_dict2`."""
         # Perform lazy initializations.
         total_score = 0.0
         sq_norm1 = 0.0
@@ -86,6 +86,7 @@ class GradientSimilarityComputer(AbstractComputer):
     def _get_reshaped_grads_dict(
         self, batch: Any, use_measurement: bool = False
     ) -> Dict[str, torch.Tensor]:
+        """Given a batch, compute the individual gradient and reshape it into a 2D matrix."""
         batch_size = self.task.get_batch_size(batch)
         grads_dict = torch.func.vmap(
             self._compute_measurement_grad()
@@ -100,13 +101,13 @@ class GradientSimilarityComputer(AbstractComputer):
             for key in key_list:
                 if key in self.supported_param_names:
                     reshaped_grads_dict[key] = grads_dict[key].reshape(batch_size, -1)
-                # Remove references to unncessary gradients.
+                # Remove references to unnecessary gradients.
                 del grads_dict[key]
             del grads_dict
         return reshaped_grads_dict
 
-    def compute_pairwise_influence(self, batch1: Any, batch2: Any) -> torch.Tensor:
-        """Compute pairwise influence scores between data points in `batch1` and `batch2`.
+    def compute_scores_with_batch(self, batch1: Any, batch2: Any) -> torch.Tensor:
+        """Compute pairwise similarity scores between data points in `batch1` and `batch2`.
 
         Args:
             batch1 (object):
@@ -127,12 +128,12 @@ class GradientSimilarityComputer(AbstractComputer):
             )
         return current_score
 
-    def compute_total_influence(
+    def compute_scores_with_loader(
         self,
         test_loader: torch.utils.data.DataLoader,
         train_loader: torch.utils.data.DataLoader,
     ) -> torch.Tensor:
-        """Compute pairwise influence scores between `test_loader` and `train_loader`.
+        """Compute pairwise similarity scores between `test_loader` and `train_loader`.
 
         Args:
             test_loader (DataLoader):
@@ -173,16 +174,34 @@ class GradientSimilarityComputer(AbstractComputer):
             num_processed_test += test_batch_size
         return score_table
 
-    def compute_self_influence(
+    def compute_self_score_with_loader(
         self,
         loader: torch.utils.data.DataLoader,
-    ) -> None:
-        if self.metric == "cos":
-            self.logger.warning("Self-influence scores with cos metric is simply 1.")
+    ) -> torch.Tensor:
+        """Compute self-similarity scores of all data points in `loader`.
+
+        Args:
+            loader (DataLoader):
+                The loader for which self-similarity scores are computed.
+        """
+        if self.metric != "dot":
+            error_msg = "Self-scores are only supported for dot similarity."
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg)
 
         scores = []
         for batch in loader:
             batch_size = self.task.get_batch_size(batch)
+            current_score = torch.zeros(
+                (batch_size,),
+                dtype=self.score_dtype,
+                device=self.task.device,
+                requires_grad=False,
+            )
             grads_dict = self._get_reshaped_grads_dict(batch, use_measurement=False)
 
-            pass
+            with torch.no_grad():
+                for name in self.supported_param_names:
+                    current_score.add_(torch.square(grads_dict[name]).sum(dim=-1))
+                scores.append(current_score)
+        return torch.cat(scores)

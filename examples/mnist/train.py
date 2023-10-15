@@ -101,7 +101,7 @@ def main(
         del model
 
         print(f"Loss: {loss}")
-        print(f"Accuracy: {loss}")
+        print(f"Accuracy: {acc}")
         print(f"Took {time.time() - start_time} seconds.")
         clear_gpu_cache()
 
