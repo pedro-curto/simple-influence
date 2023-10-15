@@ -29,7 +29,7 @@ class GradientSimilarityComputer(AbstractComputer):
                 The metric used to measure similarity. Supported metrics include "dot"
                 and "cos". Defaults to "dot".
         """
-        super().__init__(model, task)
+        super().__init__(model=model, task=task, logger_name="")
         self.func_params = dict(self.model.named_parameters())
         self.func_buffers = dict(self.model.named_buffers())
 

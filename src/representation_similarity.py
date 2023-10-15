@@ -8,12 +8,14 @@ from src.abstract_task import AbstractTask
 
 
 class RepresentationSimilarityComputer(AbstractComputer):
+    # Specifies the dtype for computing similarity scores.
+    _similarity_dtype: torch.dtype = torch.float64
+
     def __init__(
         self,
         model: nn.Module,
         task: AbstractTask,
         metric: str = "dot",
-        similarity_dtype: torch.dtype = torch.float64,
     ) -> None:
         """Initializes the `RepresentationsSimilarityComputer` class.
 
@@ -33,7 +35,7 @@ class RepresentationSimilarityComputer(AbstractComputer):
                 The data type for computing similarity measures. Defaults to "torch.float64" for
                 enhanced numerical precision.
         """
-        super().__init__(model, task)
+        super().__init__(model=model, task=task, logger_name=self.__class__.__name__)
 
         self.target_module_name = self.task.representation_modules()
         if self.target_module_name is None:
@@ -49,7 +51,6 @@ class RepresentationSimilarityComputer(AbstractComputer):
             error_msg = f"Not supported metric {self.metric} for `RepresentationSimilarityComputer`."
             self.logger.error(error_msg)
             raise NotImplementedError(error_msg)
-        self.similarity_dtype = similarity_dtype
 
         self._handle = None
         self._target_module = None
@@ -139,12 +140,12 @@ class RepresentationSimilarityComputer(AbstractComputer):
         self.model.eval()
         self._perform_forward_pass(batch1)
         acts1 = self._temp_acts.reshape(self._temp_acts.shape[0], -1).to(
-            self.similarity_dtype
+            self._similarity_dtype
         )
 
         self._perform_forward_pass(batch2)
         acts2 = self._temp_acts.reshape(self._temp_acts.shape[0], -1).to(
-            self.similarity_dtype
+            self._similarity_dtype
         )
 
         if remove_cache:
@@ -189,7 +190,7 @@ class RepresentationSimilarityComputer(AbstractComputer):
                 test_batch_size = self.task.get_batch_size(test_batch)
                 self._perform_forward_pass(test_batch)
                 test_acts = self._temp_acts.reshape(self._temp_acts.shape[0], -1).to(
-                    self.similarity_dtype
+                    self._similarity_dtype
                 )
 
                 num_processed_train = 0
@@ -198,7 +199,7 @@ class RepresentationSimilarityComputer(AbstractComputer):
                     self._perform_forward_pass(train_batch)
                     train_acts = self._temp_acts.reshape(
                         self._temp_acts.shape[0], -1
-                    ).to(self.similarity_dtype)
+                    ).to(self._similarity_dtype)
 
                     current_score = self._compute_similarity(test_acts, train_acts)
                     score_table[

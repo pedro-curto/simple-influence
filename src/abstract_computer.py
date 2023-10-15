@@ -14,6 +14,15 @@ class AbstractComputer(ABC):
     # Specifies the dtype for storing TDA scores.
     score_dtype: torch.dtype = torch.float32
 
+    # Specifies the dtype for storing gradients.
+    grads_dtype: torch.dtype = torch.float32
+
+    # Specifies the dtype for storing statistics (only applies to influence functions).
+    stats_dtype: torch.dtype = torch.float32
+
+    # Specifies the dtype for performing eigendecompositon (only applies to influence functions).
+    eig_dtype: torch.dtype = torch.float64
+
     @abstractmethod
     def __init__(
         self,
