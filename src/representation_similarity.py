@@ -95,7 +95,7 @@ class RepresentationSimilarityComputer(AbstractComputer):
         elif self.metric == "cos":
             score = batch_vector1 @ batch_vector2.t()
             query_norm = torch.linalg.norm(batch_vector1, dim=-1)
-            train_norm = torch.linalg.norm(batch_vector1, dim=-1)
+            train_norm = torch.linalg.norm(batch_vector2, dim=-1)
             score /= query_norm.unsqueeze(-1)
             score /= train_norm.unsqueeze(0)
         elif self.metric == "l2":

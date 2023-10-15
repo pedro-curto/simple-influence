@@ -44,7 +44,7 @@ def get_loaders(
     torch.utils.data.DataLoader,
 ]:
     assert data_name in ["mnist", "fmnist"]
-    train_batch_size = 128
+    train_batch_size = 512
 
     if data_name == "mnist":
         train_loader = get_mnist_dataloader(

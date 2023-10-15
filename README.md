@@ -1,6 +1,7 @@
 # Influence Functions Prototype
 
-Please note that this repository is currently under development for public release. We kindly request that you ask from sharing this implementation.
+Note that this repository is currently in development for a public release and contains code related to active research projects.
+Please ask if you would like to share the code.
 
 ## Getting Started
 
@@ -25,14 +26,20 @@ To begin, follow these steps to set up your environment:
     ```
 
 ### Running Regression Experiments
-Please note that the regression experiments only use CPUs, since the model size is small. To train the model, you can run the following command:
+
+Please note that the regression experiments exclusively utilize CPUs (without GPU) due its small size. To initiate the training process, execute the command below:
 ```bash
 cd examples/regression
 python train.py
 ```
-When the training run finishes, you can run all baseline modules using the command:
+Upon completion of the training, you can evaluate all the baseline TDA methods by running:
 ```bash
 python compute_baselines.py
+```
+For analysis of the influence distribution, I've provided a short script. You can execute it using:
+```bash
+cd evaluate
+python visualize_distribution.py
 ```
 
 ### Running MNIST Experiments

@@ -4,12 +4,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.tasks.base import BaseTask
+from src.abstract_task import AbstractTask
 
 BATCH_DTYPE = Dict[str, torch.Tensor]
 
 
-class LanguageModelTask(BaseTask):
+class LanguageModelTask(AbstractTask):
     def __init__(
         self, device: torch.device = "cpu", generator: Optional[torch.Generator] = None
     ) -> None:

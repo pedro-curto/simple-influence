@@ -11,6 +11,7 @@ from accelerate import Accelerator
 from torch.nn import CrossEntropyLoss
 
 from examples.glue.pipeline import construct_model, get_loaders
+from examples.utils import set_seed
 
 
 def train(

@@ -1,28 +1,32 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 
 
 class AbstractTask(ABC):
-    """Implementations of the Task class should allow to compute influence functions (and any
-    baseline methods) with desired configuration. See `examples/` for how the Task classes are
-    implemented for regression, classification, and language modeling.
+    """An abstract base class for Tasks.
+
+    Subclasses of this abstract class should facilitate computing TDA (Topological Data Analysis) methods
+    according to specific pipelines (e.g., models, data loaders, training objectives). For practical implementations
+    of the Task class tailored to regression, classification, and language modeling, refer to the `examples/` directory.
     """
 
     @abstractmethod
     def __init__(
-        self, device: torch.device = "cpu", generator: Optional[torch.Generator] = None
+        self,
+        device: torch.device = torch.device("cpu"),
+        generator: Optional[torch.Generator] = None,
     ) -> None:
         """Initializes the class AbstractTask.
 
         Args:
-            device (torch.dtype):
-                Device you want to use for influence computation. Defaults to CPU.
+            device (torch.device):
+                Specifies the device for computation, defaulting to CPU.
             generator (torch.Generator, optional):
-                Generator to fix the behaviour of the experiment (e.g., sampling outputs for
-                computing the true Fisher). Defaults to using non-deterministic sampling.
+                Generator for ensuring consistent experiment behavior, such as sampling outputs for
+                true Fisher computation. If not provided, defaults to non-deterministic sampling.
         """
         self.device = device
         self.generator = generator
@@ -32,27 +36,27 @@ class AbstractTask(ABC):
         self,
         model: nn.Module,
         batch: Any,
-        parameter_and_buffer_dicts: Optional[Union[Dict[str, torch.Tensor]]] = None,
+        parameter_and_buffer_dicts: Optional[Tuple[Dict[str, torch.Tensor]]] = None,
         sample: bool = False,
         reduction: str = "sum",
     ) -> torch.Tensor:
-        """Given the model and batch, compute the training loss. Note that the operations
-        in this function should be able to traced by autograd.
+        """Computes the training loss for a given model and batch. Ensure operations within this
+        function are traceable by autograd.
 
         Args:
             model (nn.Module):
-                Model.
+                PyTorch model for which the training loss will be computed.
             batch (Any):
-                Batch received from the DataLoader.
-            parameter_and_buffer_dicts (Union[Dict[str, torch.Tensor]], optional):
-                Optionally, instead of using the parameters given by `model`, one can directly
-                specify the parameters to compute the loss.
+                Batch of data sourced from the DataLoader.
+            parameter_and_buffer_dicts (tuple, optional):
+                Instead of relying on the model's inherent parameters (given by `model.parameters()`),
+                specific parameters can be directly provided for loss computation.
             sample (bool):
-                Whether to sample the labels from the outputs for computing true Fisher. If False,
-                it uses the true label.
+                If set to True, labels are sampled from the outputs; otherwise, the actual label is used.
             reduction (str):
-                By default, the function returns the sum of all losses. One can modify this behaviour
-                by specifying `average` or `none`.
+                Determines the type of output. By default, it returns the cumulative loss. To alter
+                this behavior, specify either 'average' (for the mean loss) or 'none'
+                (to get losses for each data point).
         """
         raise NotImplementedError()
 
@@ -65,58 +69,62 @@ class AbstractTask(ABC):
         sample: bool = False,
         reduction: str = "sum",
     ) -> torch.Tensor:
-        """Given the model and batch, compute the measurement (e.g., loss, margin, conditional log probability).
-        In many cases, measurements are defined as the loss, but one can implement their custom measurement.
+        """Computes the measurement (e.g., loss, margin, conditional log probability) for a given model and batch.
+        The measurement is defined as `f(\theta)` from https://arxiv.org/pdf/2308.03296.pdf. Ensure operations within
+        this function are traceable by autograd.
 
         Args:
             model (nn.Module):
-                Model.
+                PyTorch model for which the training loss will be computed.
             batch (Any):
-                Batch received from the DataLoader.
-            parameter_and_buffer_dicts (Union[Dict[str, torch.Tensor]], optional):
-                Optionally, instead of using the parameters given by `model`, one can directly
-                specify the parameters to compute the loss.
+                Batch of data sourced from the DataLoader.
+            parameter_and_buffer_dicts (tuple, optional):
+                Instead of relying on the model's inherent parameters (given by `model.parameters()`),
+                specific parameters can be directly provided for loss computation.
             sample (bool):
-                Whether to sample the labels from the outputs for computing true Fisher. If False,
-                it uses the true label.
+                If set to True, labels are sampled from the outputs; otherwise, the actual label is used.
             reduction (str):
-                By default, the function returns the sum of all losses. One can modify this behaviour
-                by specifying `average` or `none`.
+                Determines the type of output. By default, it returns the cumulative loss. To alter
+                this behavior, specify either 'average' (for the mean loss) or 'none'
+                (to get losses for each data point).
         """
         raise NotImplementedError()
 
     @abstractmethod
     def get_batch_size(self, batch: Any) -> int:
-        """Given a batch, return the batch size.
+        """Given a batch of data, return the batch size.
 
         Args:
             batch (Any):
-                Batch received from the DataLoader.
+                Batch of data sourced from the DataLoader.
         """
         raise NotImplementedError()
 
-    @abstractmethod
-    def influence_modules(self) -> List[str]:
-        """For a desired architecture, return the module names for layers wanting to compute influences on.
-        Returning None will compute influences on all available modules (e.g., Embedding, Linear, Conv2d).
+    def influence_modules(self) -> Optional[List[str]]:
+        """Returns module names of layers for which TDA methods should be computed based on the specified architecture.
+
+        If the function returns `None`, influences will be computed for all available modules such as
+        Embedding, Linear, Conv2d, etc.
         """
-        raise NotImplementedError()
+        return None
 
     @abstractmethod
-    def representation_modules(self) -> List[str]:
-        """For a desired architecture, return the module names for layers wanting to compute influences on.
-        Returning None will compute influences on all available modules (e.g., Embedding, Linear, Conv2d).
+    def representation_modules(self) -> str:
+        """Returns module name of layers for which `RepresentationSimilarity` should be computed based on
+        the specified architecture. Typically, this is set to the module just before the last layer.
         """
         raise NotImplementedError()
 
     def get_activation_masks(self, batch: Any) -> Optional[torch.Tensor]:
-        """For some architectures (e.g., Transformers), the data point is padded to have equal
-        length. Return the masks that is applied on these padded features. Returning None should
-        be the standard behaviour of architectures with fixed input size.
+        """Returns masks for data points that have been padded to ensure consistent length, as observed in
+        architectures like Transformers. For architectures with a fixed input size, the standard behavior
+        should be to return `None`.
+
+        Note that this function is used for masking activations during EK-FAC influence computations.
 
         Args:
             batch (Any):
-                Batch received from the DataLoader.
+                Batch of data sourced from the DataLoader.
         """
         del batch
         return None

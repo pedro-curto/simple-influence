@@ -9,6 +9,8 @@ from tests.utils import (
     make_dummy_regression_loader,
     make_glue_module,
     make_qnli_loader,
+    make_wiki_loader,
+    make_wiki_module,
 )
 
 
@@ -63,3 +65,14 @@ def test_glue() -> None:
 
     # When `batch_size = 1`, the outputs should be the same with and w/o padding.
     assert torch.allclose(outputs, no_pad_outputs)
+
+
+@pytest.mark.smoke
+def test_wiki() -> None:
+    # Test "wiki" test scenario.
+    loader = make_wiki_loader(batch_size=1, num_data=8)
+    model = make_wiki_module()
+
+    batch = next(iter(loader))
+    outputs = model(batch["input_ids"], batch["attention_mask"])
+    assert outputs is not None

@@ -33,26 +33,26 @@ class InfluenceFunctionComputer(AbstractComputer):
         """Initializes the `InfluenceFunctionComputer` class.
 
         This class performs TDA using influence functions. More specifically, instead of using expensive
-        iterative computers such as LiSSA, the class uses EK-FAC approximation. The details can be found
-        in https://arxiv.org/pdf/2308.03296.pdf.
+        iterative computers such as LiSSA, the class uses EK-FAC approximation. The details can be
+        found in https://arxiv.org/pdf/2308.03296.pdf.
 
         Args:
             model (nn.Module):
-                The PyTorch model for which representations are computed.
+                PyTorch model for which influences are computed.
             task (AbstractTask):
-                The task for the pipeline.
+                Specifies the task for the pipeline.
             damping (float, optional):
-                The damping term. Defaults to None, where the module-wise damping is set to be
-                0.1 x (mean of the eigenvalues).
+                A damping term. If not provided, the module-wise damping is set as
+                0.1 times the mean of the eigenvalues.
             n_epoch (int, optional):
                 Number of epochs to compute covariance and lambda statistics. Defaults to 1.
             use_true_fisher (bool, optional):
-                If set to False, the class uses empirical Fisher, where the targets are set to the true targets.
-                Defalts to True, where the targets are sampled from the outputs.
+                If set to True, targets are sampled from the outputs. If set to False, the
+                empirical Fisher is used, and the targets are set to the true targets. Default is True.
             cov_dtype (dtype, optional):
-                Dtype to store covariance statistics.
+                Specifies the dtype for storing covariance statistics. Defaults to torch.float32.
             grads_dtype (dtype, optional):
-                Dtype to choose what dtype to use for preconditioning.
+                Specifies the dtype for computing preconditioning. Defaults to torch.float32.
         """
         super().__init__(model, task)
         self.func_params = dict(self.model.named_parameters())

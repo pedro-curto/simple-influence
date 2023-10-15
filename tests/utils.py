@@ -5,7 +5,6 @@ import torchvision
 from torch import nn
 from torch.utils import data
 
-from examples.glue.pipeline import construct_model, get_dataloader
 from examples.glue.task import TextClassificationTask
 from src.abstract_task import AbstractTask
 from tests.dummy_tasks import ConvBNTask, ConvTask, MLPTask
@@ -30,6 +29,7 @@ def prepare_test(
     2. "conv: Classification task with a convolutional neural network.
     3. "conv_bn": Classification task with a convolutional neural network (the architecture uses batch norm).
     4. "glue": Text classification task utilizing the BERT model.
+    5. "wiki": Language modeling task with GPT-2.
 
     Args:
         test_name (str):
@@ -76,7 +76,7 @@ def prepare_test(
             batch_size=valid_batch_size, num_data=valid_size, seed=seed
         )
         task = ConvBNTask(device=device)
-    elif test_name == "transformer":
+    elif test_name == "glue":
         model = make_glue_module(seed=seed)
         train_loader = make_qnli_loader(
             batch_size=train_batch_size,
@@ -88,6 +88,19 @@ def prepare_test(
             batch_size=valid_batch_size,
             num_data=valid_size,
             do_not_pad=do_not_pad,
+            seed=seed,
+        )
+        task = TextClassificationTask(device=device)
+    elif test_name == "wiki":
+        model = make_wiki_module(seed=seed)
+        train_loader = make_wiki_loader(
+            batch_size=train_batch_size,
+            num_data=train_size,
+            seed=seed,
+        )
+        valid_loader = make_wiki_loader(
+            batch_size=valid_batch_size,
+            num_data=valid_size,
             seed=seed,
         )
         task = TextClassificationTask(device=device)
@@ -210,6 +223,8 @@ def make_glue_module(seed: int = 0) -> nn.Module:
         seed (int, optional):
             Random seed for model initialization. Defaults to 0.
     """
+    from examples.glue.pipeline import construct_model
+
     torch.manual_seed(seed)
     return construct_model(data_name="qnli")
 
@@ -232,6 +247,8 @@ def make_qnli_loader(
         seed (int, optional):
             Random seed for dataset generation. Defaults to 0.
     """
+    from examples.glue.pipeline import get_dataloader
+
     torch.manual_seed(seed)
     loader = get_dataloader(
         data_name="qnli",
@@ -239,6 +256,45 @@ def make_qnli_loader(
         split="eval_train",
         indices=list(range(num_data)),
         do_not_pad=do_not_pad,
+    )
+    return loader
+
+
+def make_wiki_module(seed: int = 0) -> nn.Module:
+    """Creates a wiki model.
+
+    Args:
+        seed (int, optional):
+            Random seed for model initialization. Defaults to 0.
+    """
+    from examples.wiki.pipeline import construct_model
+
+    torch.manual_seed(seed)
+    return construct_model()
+
+
+def make_wiki_loader(
+    batch_size: int,
+    num_data: int,
+    seed: int = 0,
+) -> torch.utils.data.DataLoader:
+    """Load the QNLI dataset and return the data loader.
+
+    Args:
+        batch_size (int):
+            Batch size for the data loader.
+        num_data (int):
+            Size of the synthetic dataset.
+        seed (int, optional):
+            Random seed for dataset generation. Defaults to 0.
+    """
+    from examples.wiki.pipeline import get_wiki_dataloader
+
+    torch.manual_seed(seed)
+    loader = get_wiki_dataloader(
+        batch_size=batch_size,
+        split="eval_train",
+        indices=list(range(num_data)),
     )
     return loader
 

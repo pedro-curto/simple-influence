@@ -67,7 +67,7 @@ def compute_reps_similarity(data_name: str, model_ids: List[int]) -> None:
             metric="l2",
         )
         scores = computer.compute_total_influence(
-            valid_loader=valid_loader, train_loader=eval_train_loader
+            test_loader=valid_loader, train_loader=eval_train_loader
         )
         expt_name = f"{data_name}_representations_similarity_l2"
         torch.save(scores, f"{BASE_PATH}/{mid}/{expt_name}.pt")
@@ -78,7 +78,7 @@ def compute_reps_similarity(data_name: str, model_ids: List[int]) -> None:
             metric="cos",
         )
         scores = computer.compute_total_influence(
-            valid_loader=valid_loader, train_loader=eval_train_loader
+            test_loader=valid_loader, train_loader=eval_train_loader
         )
         expt_name = f"{data_name}_representations_similarity_cos"
         torch.save(scores, f"{BASE_PATH}/{mid}/{expt_name}.pt")
@@ -98,7 +98,7 @@ def compute_grads_similarity(
             metric="dot",
         )
         scores = computer.compute_total_influence(
-            valid_loader=valid_loader, train_loader=eval_train_loader
+            test_loader=valid_loader, train_loader=eval_train_loader
         )
         expt_name = f"{data_name}_gradients_similarity_dot"
         torch.save(scores, f"{BASE_PATH}/{mid}/{expt_name}.pt")
@@ -109,7 +109,7 @@ def compute_grads_similarity(
             metric="cos",
         )
         scores = computer.compute_total_influence(
-            valid_loader=valid_loader, train_loader=eval_train_loader
+            test_loader=valid_loader, train_loader=eval_train_loader
         )
         expt_name = f"{data_name}_gradients_similarity_cos"
         torch.save(scores, f"{BASE_PATH}/{mid}/{expt_name}.pt")
@@ -155,7 +155,7 @@ def compute_tracin(
         scores = computer.compute_total_influence(
             checkpoints=checkpoints,
             lrs=lr,
-            valid_loader=valid_loader,
+            test_loader=valid_loader,
             train_loader=eval_train_loader,
         )
         expt_name = f"{data_name}_tracin"
@@ -165,7 +165,7 @@ def compute_tracin(
         scores = computer.compute_total_influence(
             checkpoints=checkpoints,
             lrs=lr,
-            valid_loader=valid_loader,
+            test_loader=valid_loader,
             train_loader=eval_train_loader,
         )
         expt_name = f"{data_name}_gas"
