@@ -27,7 +27,7 @@ def train(
         os.makedirs(f"files/checkpoints/{model_id}", exist_ok=True)
         torch.save(
             model.state_dict(),
-            f"files/checkpoints/{model_id}/{save_name}_iter_0.pt",
+            f"files/checkpoints/{model_id}/{save_name}_epoch_0.pt",
         )
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     loss_fn = CrossEntropyLoss()
@@ -51,11 +51,10 @@ def train(
             optimizer.step()
             num_iter += 1
 
-            if save and num_iter % 375 == 0:
-                # This should yield 25 checkpoints.
+            if save:
                 torch.save(
                     model.state_dict(),
-                    f"files/checkpoints/{model_id}/{save_name}_iter_{num_iter}.pt",
+                    f"files/checkpoints/{model_id}/{save_name}_epoch_{epoch}.pt",
                 )
     return model
 

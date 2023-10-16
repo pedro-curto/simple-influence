@@ -26,7 +26,7 @@ def prepare_everything(data_name: str = "qnli", model_id: int = 0):
     model = construct_model(data_name=data_name)
     model.load_state_dict(
         torch.load(
-            f"files/checkpoints/{model_id}/{data_name}_iter_9375.pt",
+            f"files/checkpoints/{model_id}/{data_name}_epoch_3.pt",
             map_location="cpu",
         )
     )

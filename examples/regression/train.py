@@ -98,6 +98,6 @@ def main(data_name: str, num_train: int = 50) -> None:
 
 
 if __name__ == "__main__":
-    data_names = ["concrete", "parkinsons"]
+    data_names = ["concrete"]
     for dn in data_names:
         main(data_name=dn, num_train=1)

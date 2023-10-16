@@ -8,12 +8,8 @@ from sklearn.preprocessing import StandardScaler
 
 
 def construct_regression_mlp(data_name: str) -> nn.Module:
-    assert data_name in ["concrete", "naval", "parkinsons"]
-    if data_name == "parkinsons":
-        num_inputs = 21
-    else:
-        num_inputs = 8
-
+    del data_name
+    num_inputs = 8
     model = torch.nn.Sequential(
         nn.Linear(num_inputs, 128, bias=True),
         nn.ReLU(),
