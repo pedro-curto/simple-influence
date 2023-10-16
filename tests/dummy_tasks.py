@@ -17,7 +17,7 @@ class MLPTask(RegressionTask):
     def influence_modules(self) -> Optional[List[str]]:
         return ["0", "2", "4"]
 
-    def representation_modules(self) -> str:
+    def representation_module(self) -> str:
         return "2"
 
 
@@ -30,7 +30,7 @@ class ConvTask(ClassificationTask):
     def influence_modules(self) -> Optional[List[str]]:
         return ["0", "2", "5"]
 
-    def representation_modules(self) -> str:
+    def representation_module(self) -> str:
         return "2"
 
 
@@ -45,5 +45,5 @@ class ConvBNTask(ClassificationTask):
         # BN layers if needed).
         return ["0", "3", "7"]
 
-    def representation_modules(self) -> str:
+    def representation_module(self) -> str:
         return "5"

@@ -6,7 +6,7 @@ from torch import nn
 from torch.utils import data
 
 from examples.glue.task import TextClassificationTask
-from src.abstract_task import AbstractTask
+from src.abstract_task import AbstractTask, validate_task
 from tests.dummy_tasks import ConvBNTask, ConvTask, MLPTask
 
 

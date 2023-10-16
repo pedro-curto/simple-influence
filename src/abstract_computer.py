@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict
 import torch
 import torch.nn as nn
 
-from src.abstract_task import AbstractTask
+from src.abstract_task import AbstractTask, validate_task
 
 
 class AbstractComputer(ABC):
@@ -51,6 +51,8 @@ class AbstractComputer(ABC):
         logging.basicConfig()
         self.logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging_level)
+
+        validate_task(model=self.model, task=self.task, logger=self.logger)
 
     def _compute_train_loss(
         self,

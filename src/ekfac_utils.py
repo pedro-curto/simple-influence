@@ -126,7 +126,6 @@ def extract_activations(
         reshaped_activations = activations.reshape(-1, activations.shape[-1])
         if module.bias is not None:
             shape = list(reshaped_activations.shape[:-1]) + [1]
-
             append_term = reshaped_activations.new_ones(shape)
             if (
                 activations_mask is not None

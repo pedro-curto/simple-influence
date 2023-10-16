@@ -1,8 +1,14 @@
+import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
+
+
+class InvalidTaskError(Exception):
+    # Raised when the task is invalid.
+    pass
 
 
 class AbstractTask(ABC):
@@ -110,7 +116,7 @@ class AbstractTask(ABC):
         return None
 
     @abstractmethod
-    def representation_modules(self) -> str:
+    def representation_module(self) -> str:
         """Returns module name of layers for which `RepresentationSimilarity` should be computed based on
         the specified architecture. Typically, this is set to the module just before the last layer.
         """
@@ -129,3 +135,59 @@ class AbstractTask(ABC):
         """
         del batch
         return None
+
+
+def validate_task(
+    model: nn.Module, task: AbstractTask, logger: Optional[logging.Logger] = None
+) -> None:
+    """Tests if the `task` is properly defined for the given `model`.
+
+    Args:
+        model (nn.Module):
+            PyTorch module to test.
+        task (AbstractTask):
+            Task specific to the given model.
+        logger (Logger, optional):
+            If provided, sends error messages through logger.
+    """
+    influence_modules = task.influence_modules()
+    influence_module_exists_dict = {name: False for name in influence_modules}
+    representation_module = task.representation_module()
+    if representation_module is None and logger is not None:
+        logger.warning("`representation_module` is not defined.")
+        representation_module_exists = True
+    else:
+        representation_module_exists = False
+
+    for name, module in model.named_modules():
+        if name in influence_module_exists_dict.keys():
+            if not isinstance(
+                module,
+                (nn.Linear, nn.Conv2d, nn.Embedding, nn.LayerNorm, nn.BatchNorm2d),
+            ):
+                error_msg = (
+                    f"The provided influence module with {name} is not supported."
+                )
+                if logger is not None:
+                    logger.error(error_msg)
+                raise InvalidTaskError(error_msg)
+            influence_module_exists_dict[name] = True
+        if representation_module is not None and representation_module == name:
+            representation_module_exists = True
+
+    if not all(list(influence_module_exists_dict.values())):
+        error_msg = (
+            f"Some provided influence modules were not found. The found mapping: "
+            f"{list(influence_module_exists_dict.values())}."
+        )
+        if logger is not None:
+            logger.error(error_msg)
+        raise InvalidTaskError(error_msg)
+
+    if not representation_module_exists:
+        error_msg = f"Provided representation module with name {representation_module} was not found."
+        if logger is not None:
+            logger.error(error_msg)
+        raise InvalidTaskError(error_msg)
+
+    return

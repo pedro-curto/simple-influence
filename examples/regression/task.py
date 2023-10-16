@@ -60,5 +60,5 @@ class RegressionTask(AbstractTask):
     def influence_modules(self) -> List[str]:
         return ["0", "2", "4", "6"]
 
-    def representation_modules(self) -> str:
+    def representation_module(self) -> str:
         return "4"

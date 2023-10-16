@@ -93,7 +93,7 @@ class TextClassificationTask(AbstractTask):
 
         return total_modules
 
-    def representation_modules(self) -> str:
+    def representation_module(self) -> str:
         return "model.bert.pooler.dense"
 
     def get_activation_masks(self, batch: Any) -> Optional[torch.Tensor]:

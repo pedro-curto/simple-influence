@@ -100,7 +100,7 @@ class LanguageModelTask(AbstractTask):
 
         return total_modules
 
-    def representation_modules(self) -> str:
+    def representation_module(self) -> str:
         return "model.transformer.h.11.ln_f"
 
     def get_activation_masks(self, batch: Any) -> Optional[torch.Tensor]:

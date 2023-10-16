@@ -65,5 +65,5 @@ class ClassificationTask(AbstractTask):
     def influence_modules(self) -> List[str]:
         return ["1", "3", "5", "7"]
 
-    def representation_modules(self) -> str:
+    def representation_module(self) -> str:
         return "5"

@@ -34,11 +34,11 @@ class RepresentationSimilarityComputer(AbstractComputer):
         """
         super().__init__(model=model, task=task, logger_name=self.__class__.__name__)
 
-        self.target_module_name = self.task.representation_modules()
+        self.target_module_name = self.task.representation_module()
         if self.target_module_name is None:
             error_msg = (
                 f"For `{self.__class__.__name__}`, the target module name must be specified "
-                "by defining `AbstractTask.representation_modules()`."
+                "by defining `AbstractTask.representation_module()`."
             )
             self.logger.error(error_msg)
             raise NotImplementedError(error_msg)
