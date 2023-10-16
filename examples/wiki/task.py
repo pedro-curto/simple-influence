@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, List
 
 import torch
 import torch.nn as nn
@@ -71,6 +71,24 @@ class LanguageModelTask(AbstractTask):
 
     def get_batch_size(self, batch: BATCH_DTYPE) -> int:
         return batch["labels"].shape[0]
+
+    def influence_modules(self) -> List[str]:
+        total_modules = []
+
+        # Add attention layers:
+        for i in range(12):
+            total_modules.append(f"model.transformer.h.{i}.attn.c_attn")
+            total_modules.append(f"model.transformer.h.{i}.attn.c_proj")
+
+        # Add MLP layers:
+        for i in range(12):
+            total_modules.append(f"model.transformer.h.{i}.mlp.c_fc")
+            total_modules.append(f"model.transformer.h.{i}.mlp.c_proj")
+
+        return total_modules
+
+    def representation_modules(self) -> str:
+        return "model.transformer.h.11.ln_f"
 
     def get_activation_masks(self, batch: Any) -> Optional[torch.Tensor]:
         return batch["attention_mask"].unsqueeze(-1).to(self.device)

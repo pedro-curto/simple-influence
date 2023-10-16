@@ -11,6 +11,21 @@ from transformers import (
     AutoTokenizer,
     default_data_collator,
 )
+from transformers.pytorch_utils import Conv1D
+
+
+def replace_conv1d_modules(model):
+    # GPT-2 is defined in terms of Conv1D. However, this does not work for EK-FAC.
+    # Here, we convert these Conv1D modules to linear modules recursively.
+    for name, module in model.named_children():
+        if len(list(module.children())) > 0:
+            replace_conv1d_modules(module)
+
+        if isinstance(module, Conv1D):
+            new_module = nn.Linear(in_features=module.weight.shape[0], out_features=module.weight.shape[1])
+            new_module.weight.data.copy_(module.weight.data.t())
+            new_module.bias.data.copy_(module.bias.data)
+            setattr(model, name, new_module)
 
 
 class LanguageModel(nn.Module):
@@ -28,6 +43,7 @@ class LanguageModel(nn.Module):
             ignore_mismatched_sizes=False,
             trust_remote_code=True,
         )
+        replace_conv1d_modules(self.model)
 
     def forward(
         self,
@@ -45,7 +61,7 @@ def construct_model() -> nn.Module:
 
 
 def get_loaders(
-    eval_batch_size: int = 32,
+    eval_batch_size: int = 16,
     train_indices: Optional[List[int]] = None,
     valid_indices: Optional[List[int]] = None,
 ) -> Tuple[
@@ -53,7 +69,7 @@ def get_loaders(
     torch.utils.data.DataLoader,
     torch.utils.data.DataLoader,
 ]:
-    train_batch_size = 16
+    train_batch_size = 8
 
     train_loader = get_wiki_dataloader(
         batch_size=train_batch_size,
@@ -74,7 +90,7 @@ def get_loaders(
 
 
 def get_wiki_dataloader(
-    batch_size: int = 32,
+    batch_size: int,
     split: str = "train",
     indices: List[int] = None,
 ) -> torch.utils.data.DataLoader:

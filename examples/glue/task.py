@@ -73,12 +73,28 @@ class TextClassificationTask(AbstractTask):
         return batch["labels"].shape[0]
 
     def influence_modules(self) -> List[str]:
-        # Only compute influences on Attention and MLP layers.
-        raise NotImplementedError()
+        total_modules = []
 
-    def representation_modules(self) -> List[str]:
-        # Only compute influences on Attention and MLP layers.
-        raise NotImplementedError()
+        # Add attention layers:
+        for i in range(12):
+            total_modules.append(f"model.bert.encoder.layer.{i}.attention.self.query")
+            total_modules.append(f"model.bert.encoder.layer.{i}.attention.self.key")
+            total_modules.append(f"model.bert.encoder.layer.{i}.attention.self.value")
+            total_modules.append(f"model.bert.encoder.layer.{i}.attention.output.dense")
+
+        # Add MLP layers:
+        for i in range(12):
+            total_modules.append(f"model.bert.encoder.layer.{i}.intermediate.dense")
+            total_modules.append(f"model.bert.encoder.layer.{i}.output.dense")
+
+        # Final classification layers:
+        total_modules.append("model.bert.pooler.dense")
+        total_modules.append("model.classifier")
+
+        return total_modules
+
+    def representation_modules(self) -> str:
+        return "model.bert.pooler.dense"
 
     def get_activation_masks(self, batch: Any) -> Optional[torch.Tensor]:
         return batch["attention_mask"].unsqueeze(-1).to(self.device)
