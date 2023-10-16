@@ -107,5 +107,5 @@ def main(
 
 
 if __name__ == "__main__":
-    main(data_name="mnist", num_train=5)
-    main(data_name="fmnist", num_train=5)
+    main(data_name="mnist", num_train=1)
+    main(data_name="fmnist", num_train=1)

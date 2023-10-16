@@ -24,14 +24,13 @@ def train(
 ) -> nn.Module:
     save = save_name is not None
     if save:
-        os.makedirs(f"checkpoints/{model_id}", exist_ok=True)
+        os.makedirs(f"files/checkpoints/{model_id}", exist_ok=True)
         torch.save(
             model.state_dict(),
-            f"checkpoints/{model_id}/{save_name}_iter_0.pt",
+            f"files/checkpoints/{model_id}/{save_name}_iter_0.pt",
         )
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     loss_fn = CrossEntropyLoss()
-    # For details, see `configure_hp.py`.
     epochs = 3
 
     num_update_steps_per_epoch = math.ceil(len(loader))
@@ -43,7 +42,7 @@ def train(
     num_iter = 0
     for epoch in range(1, epochs + 1):
         for step, batch in enumerate(loader):
-            optimizer.zero_grad(set_to_none=True)
+            optimizer.zero_grad()
             outputs = model(
                 batch["input_ids"], batch["token_type_ids"], batch["attention_mask"]
             )
@@ -56,7 +55,7 @@ def train(
                 # This should yield 25 checkpoints.
                 torch.save(
                     model.state_dict(),
-                    f"checkpoints/{model_id}/{save_name}_iter_{num_iter}.pt",
+                    f"files/checkpoints/{model_id}/{save_name}_iter_{num_iter}.pt",
                 )
     return model
 
@@ -88,30 +87,17 @@ def model_evaluate(
     return total_loss / total_num, eval_metric["accuracy"]
 
 
-def get_hyperparameters(data_name: str) -> Tuple[float, float]:
-    # For details, see `configure_hp.py`.
-    del data_name
-    lr = 2e-5
-    wd = 0.01
-    return lr, wd
-
-
 def main(
-    data_name: str = "qnli", num_train: int = 50, do_corrupt: bool = False
+    data_name: str = "qnli", num_train: int = 1,
 ) -> None:
-    init_pytorch()
-    os.makedirs("../checkpoints", exist_ok=True)
+    os.makedirs("files/", exist_ok=True)
+    os.makedirs("files/checkpoints", exist_ok=True)
 
     train_loader, _, valid_loader = get_loaders(
         data_name=data_name,
-        do_corrupt=do_corrupt,
     )
-    lr, wd = get_hyperparameters(data_name)
 
     save_name = data_name
-    if do_corrupt:
-        save_name += "_corrupted"
-
     for i in range(num_train):
         print(f"Training {i}th model ...")
         start_time = time.time()
@@ -122,8 +108,6 @@ def main(
         train(
             model=model,
             loader=train_loader,
-            lr=lr,
-            weight_decay=wd,
             model_id=i,
             save_name=save_name,
         )
@@ -136,20 +120,5 @@ def main(
 
 
 if __name__ == "__main__":
-    import sys
-
-    try:
-        option = int(sys.argv[1])
-        if option == 1:
-            main(data_name="qnli", do_corrupt=False, num_train=50)
-            main(data_name="qnli", do_corrupt=True, num_train=50)
-        elif option == 2:
-            main(data_name="sst2", do_corrupt=False, num_train=50)
-            main(data_name="sst2", do_corrupt=True, num_train=50)
-        else:
-            raise NotImplementedError(f"Not available option {option}.")
-
-    except IndexError:
-        print("Debug mode...")
-        # main(data_name="sst2", do_corrupt=False, num_train=1)
-        main(data_name="qnli", do_corrupt=False, num_train=1)
+    main(data_name="sst2", num_train=1)
+    main(data_name="qnli", num_train=1)

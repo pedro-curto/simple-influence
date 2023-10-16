@@ -12,18 +12,6 @@ from transformers import (
     default_data_collator,
 )
 
-GLUE_TASK_TO_KEYS = {
-    "cola": ("sentence", None),
-    "mnli": ("premise", "hypothesis"),
-    "mrpc": ("sentence1", "sentence2"),
-    "qnli": ("question", "sentence"),
-    "qqp": ("question1", "question2"),
-    "rte": ("sentence1", "sentence2"),
-    "sst2": ("sentence", None),
-    "stsb": ("sentence1", "sentence2"),
-    "wnli": ("sentence1", "sentence2"),
-}
-
 
 class LanguageModel(nn.Module):
     def __init__(self) -> None:

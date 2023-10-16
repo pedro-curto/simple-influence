@@ -100,4 +100,4 @@ def main(data_name: str, num_train: int = 50) -> None:
 if __name__ == "__main__":
     data_names = ["concrete", "parkinsons"]
     for dn in data_names:
-        main(data_name=dn, num_train=5)
+        main(data_name=dn, num_train=1)
