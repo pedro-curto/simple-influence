@@ -26,36 +26,44 @@ class LanguageModelTask(AbstractTask):
         if parameter_and_buffer_dicts is None:
             inputs = (
                 batch["input_ids"].to(self.device),
-                batch["token_type_ids"].to(self.device),
                 batch["attention_mask"].to(self.device),
             )
-            outputs = model(*inputs)
+            lm_logits = model(*inputs)
         else:
             params, buffers = parameter_and_buffer_dicts
-            outputs = torch.func.functional_call(
+            lm_logits = torch.func.functional_call(
                 model,
                 (params, buffers),
                 args=(
                     batch["input_ids"].unsqueeze(0).to(self.device),
-                    batch["token_type_ids"].unsqueeze(0).to(self.device),
                     batch["attention_mask"].unsqueeze(0).to(self.device),
                 ),
             )
             batch["labels"] = batch["labels"].unsqueeze(0).to(self.device)
 
+        batch_size = lm_logits.shape[0]
+        shift_logits = lm_logits[..., :-1, :].contiguous()
+
         if not sample:
-            return F.cross_entropy(
-                outputs, batch["labels"].to(self.device), reduction=reduction
-            )
+            labels = batch["labels"].to(self.device)
+            shift_labels = labels[..., 1:].contiguous()
+            reshaped_shift_logits = shift_logits.view(-1, shift_logits.size(-1))
+            summed_loss = F.cross_entropy(reshaped_shift_logits, shift_labels.view(-1), reduction="sum")
         else:
             with torch.no_grad():
-                probs = torch.nn.functional.softmax(outputs, dim=-1)
+                reshaped_shift_logits = shift_logits.view(-1, shift_logits.size(-1))
+                probs = torch.nn.functional.softmax(reshaped_shift_logits, dim=-1)
                 sampled_labels = torch.multinomial(
                     probs, num_samples=1, generator=self.generator
                 ).flatten()
-            return F.cross_entropy(
-                outputs, sampled_labels.detach(), reduction=reduction
-            )
+            summed_loss = F.cross_entropy(reshaped_shift_logits, sampled_labels.detach(), reduction="sum")
+
+        if reduction == "sum":
+            return summed_loss
+        elif reduction == "mean":
+            return summed_loss / batch_size
+        else:
+            raise NotImplementedError("Not supported reduction provided.")
 
     def get_measurement(
         self,

@@ -75,10 +75,10 @@ def model_evaluate(
             )
             shift_logits = lm_logits[..., :-1, :].contiguous()
             shift_labels = batch["labels"][..., 1:].contiguous()
-            reshpaed_shift_logits = shift_logits.view(-1, shift_logits.size(-1))
-            loss = loss_fn(reshpaed_shift_logits, shift_labels.view(-1)).detach().float()
+            reshaped_shift_logits = shift_logits.view(-1, shift_logits.size(-1))
+            loss = loss_fn(reshaped_shift_logits, shift_labels.view(-1)).detach().float()
             total_loss += loss
-        total_num += reshpaed_shift_logits.shape[0]
+        total_num += reshaped_shift_logits.shape[0]
     return total_loss.item() / total_num
 
 

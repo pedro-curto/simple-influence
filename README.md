@@ -3,6 +3,8 @@
 Note that this repository is currently in development for a public release and contains code related to active research projects.
 Please ask if you would like to share the code.
 
+The public release of influence functions plan to happen late in 2023 (with 10x and above faster implementation that the code provided here).
+
 ## Getting Started
 
 To begin, follow these steps to set up your environment:
