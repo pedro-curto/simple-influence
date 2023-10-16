@@ -25,19 +25,18 @@ def train(
         os.makedirs(f"files/checkpoints/{model_id}", exist_ok=True)
         torch.save(
             model.state_dict(),
-            f"files/checkpoints/{model_id}/{save_name}_iter_0.pt",
+            f"files/checkpoints/{model_id}/{save_name}_epoch_0.pt",
         )
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     loss_fn = CrossEntropyLoss()
     epochs = 3
 
     num_update_steps_per_epoch = math.ceil(len(loader))
-    accelerator = Accelerator()
+    accelerator = Accelerator(cpu=True)
     model, optimizer, loader = accelerator.prepare(model, optimizer, loader)
     assert math.ceil(len(loader)) == num_update_steps_per_epoch
 
     model.train()
-    num_iter = 0
     for epoch in range(1, epochs + 1):
         for step, batch in enumerate(loader):
             optimizer.zero_grad()
@@ -49,13 +48,11 @@ def train(
             loss = loss_fn(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             loss.backward()
             optimizer.step()
-            num_iter += 1
 
-            if save and num_iter % 375 == 0:
-                # This should yield 5 checkpoints.
+            if save:
                 torch.save(
                     model.state_dict(),
-                    f"files/checkpoints/{model_id}/{save_name}_iter_{num_iter}.pt",
+                    f"files/checkpoints/{model_id}/{save_name}_epoch_{epoch}.pt",
                 )
     return model
 
