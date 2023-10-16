@@ -161,3 +161,4 @@ cython_debug/
 
 # Intermediate checkpoints and results (too large to upload on GitHub)
 files/
+temp/
