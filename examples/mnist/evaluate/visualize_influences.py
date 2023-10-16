@@ -5,17 +5,19 @@ import torch
 from examples.mnist.pipeline import get_loaders
 
 
-def main(data_name: str = "mnist"):
-    scores = torch.load(f"../files/results/0/{data_name}_if.pt", map_location="cpu")
+def main(data_name: str = "mnist", model_id: int = 0):
+    scores = torch.load(
+        f"../files/results/{model_id}/{data_name}_if.pt", map_location="cpu"
+    )
 
     _, eval_train_loader, valid_loader = get_loaders(
         data_name=data_name,
         train_indices=None,
-        valid_indices=list(range(16)),
+        valid_indices=list(range(6)),
         eval_batch_size=8,
     )
 
-    for i, idx in enumerate(range(4)):
+    for i, idx in enumerate(range(6)):
         fig, axs = plt.subplots(ncols=7, figsize=(15, 3))
         fig.suptitle("Top Influential Images")
         axs[0].imshow(
@@ -34,6 +36,7 @@ def main(data_name: str = "mnist"):
                 )
             )
             axs[ii + 2].axis("off")
+        axs[1].set_axis_off()
         fig.show()
 
 

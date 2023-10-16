@@ -172,5 +172,5 @@ def extract_gradients(gradients: torch.Tensor, module: nn.Module) -> torch.Tenso
         reshaped_grads = gradients.permute(0, 2, 3, 1)
         reshaped_grads = reshaped_grads.reshape(-1, reshaped_grads.size(-1))
     else:
-        raise NotImplementedError()
+        raise InvalidModuleError()
     return reshaped_grads

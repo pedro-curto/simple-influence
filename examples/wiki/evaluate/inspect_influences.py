@@ -16,7 +16,7 @@ def main(model_id: int = 0):
         "gpt2", use_fast=True, trust_remote_code=True
     )
 
-    for i in range(4):
+    for i in range(16):
         print("=" * 80)
         print(f"{i}th data point")
         print("Sequence:")
@@ -24,7 +24,7 @@ def main(model_id: int = 0):
 
         print("Most influential data point")
         rank = torch.argsort(scores[i], descending=True)
-        for j in range(3):
+        for j in range(1):
             print(f"Rank {j} (score = {scores[i][rank[j]]})")
             print(
                 tokenizer.decode(eval_train_loader.dataset[int(rank[j])]["input_ids"])

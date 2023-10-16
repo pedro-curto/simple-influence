@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 
 import torch
 
@@ -17,7 +17,7 @@ class MLPTask(RegressionTask):
     def influence_modules(self) -> Optional[List[str]]:
         return ["0", "2", "4"]
 
-    def representation_modules(self):
+    def representation_modules(self) -> str:
         return "2"
 
 
@@ -41,6 +41,8 @@ class ConvBNTask(ClassificationTask):
         super().__init__(device=device, generator=generator)
 
     def influence_modules(self) -> Optional[List[str]]:
+        # Ignore score computations on BN layers (note that this is just for testing; we can include
+        # BN layers if needed).
         return ["0", "3", "7"]
 
     def representation_modules(self) -> str:
