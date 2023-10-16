@@ -28,7 +28,7 @@ def prepare_everything(model_id: int = 0):
     model = construct_model()
     model.load_state_dict(
         torch.load(
-            f"files/checkpoints/{model_id}/wiki_iter_1500.pt",
+            f"files/checkpoints/{model_id}/wiki_epoch_3.pt",
             map_location="cpu",
         )
     )
