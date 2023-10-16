@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -7,6 +7,30 @@ import torch.nn.functional as F
 from src.abstract_task import AbstractTask
 
 BATCH_DTYPE = Tuple[torch.Tensor, torch.Tensor]
+
+
+class RegressionModelOutput:
+    @staticmethod
+    def get_output(
+        model: torch.nn.Module,
+        weights: Dict[str, torch.Tensor],
+        buffers: Dict[str, torch.Tensor],
+        inputs: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> torch.Tensor:
+        outputs = torch.func.functional_call(
+            model, (weights, buffers), inputs.unsqueeze(0)
+        )
+        return ((outputs - targets) ** 2.0).sum()
+
+    @staticmethod
+    def get_out_to_loss_grad(
+        model, weights, buffers, batch: Iterable[torch.Tensor]
+    ) -> torch.Tensor:
+        del model, weights, buffers
+        inputs, targets = batch
+        # The gradient of the loss with respect to loss is just 1.
+        return torch.ones(1, device=inputs.device)
 
 
 class RegressionTask(AbstractTask):
@@ -62,3 +86,6 @@ class RegressionTask(AbstractTask):
 
     def representation_module(self) -> str:
         return "4"
+
+    def get_model_output(self) -> Optional[Any]:
+        return RegressionModelOutput()

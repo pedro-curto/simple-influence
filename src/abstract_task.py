@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 
+from trak.modelout_functions import AbstractModelOutput
+
 
 class InvalidTaskError(Exception):
     # Raised when the task is invalid.
@@ -136,6 +138,18 @@ class AbstractTask(ABC):
         del batch
         return None
 
+    def get_model_output(self) -> Optional[AbstractModelOutput]:
+        """TRAK requires implementing the AbstractModeOutput. To use TRAK, this method must
+        be implemented and functioning correctly.
+
+         AbstractModelOutput should contain two functions:
+        - The model output function itself.
+        - The gradient of the (training) loss w.r.t. the model output function.
+
+        See https://trak.readthedocs.io/en/latest/modeloutput.html for details.
+        """
+        return None
+
 
 def validate_task(
     model: nn.Module, task: AbstractTask, logger: Optional[logging.Logger] = None
@@ -158,6 +172,12 @@ def validate_task(
         representation_module_exists = True
     else:
         representation_module_exists = False
+
+    model_output = task.get_model_output()
+    if model_output is None and logger is not None:
+        logger.warning(
+            "`model_output` is not defined (this must be implemented for TRAK)."
+        )
 
     for name, module in model.named_modules():
         if name in influence_module_exists_dict.keys():

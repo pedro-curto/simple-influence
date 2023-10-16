@@ -7,6 +7,7 @@ from src.gradient_similarity import GradientSimilarityComputer
 from src.influence_function import InfluenceFunctionComputer
 from src.representation_similarity import RepresentationSimilarityComputer
 from src.tracin import TracinComputer
+from src.trak import TrakComputer
 from tests.utils import check_model_equivalence, prepare_test
 
 RTOL = 1e-3
@@ -234,3 +235,35 @@ def test_influence_function(test_name: str) -> None:
     )
     self_scores = computer.compute_self_scores_with_loader(loader=train_loader)
     assert torch.allclose(self_scores, torch.diag(scores), rtol=RTOL, atol=ATOL)
+
+
+@pytest.mark.parametrize("test_name", ["mlp", "conv", "conv_bn"])
+def test_trak(test_name: str) -> None:
+    train_size, valid_size = 32, 16
+    model, train_loader, valid_loader, task = prepare_test(
+        device=DEVICE,
+        test_name=test_name,
+        train_size=train_size,
+        valid_size=valid_size,
+        seed=0,
+    )
+    torch.save(model.state_dict(), "/tmp/trak_model.pth")
+    checkpoints = ["/tmp/trak_model.pth"]
+
+    original_model = copy.deepcopy(model)
+
+    computer = TrakComputer(
+        model=model,
+        task=task,
+        proj_dim=16,
+    )
+    scores = computer.compute_scores_with_loader(
+        test_loader=valid_loader,
+        train_loader=train_loader,
+        checkpoints=checkpoints,
+        expt_name=f"{test_name}_pytest",
+    )
+    assert len(scores.shape) == 2
+    assert scores.shape[0] == valid_size
+    assert scores.shape[1] == train_size
+    assert check_model_equivalence(original_model, model)

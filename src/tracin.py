@@ -46,7 +46,7 @@ class TracinComputer(AbstractComputer):
         self.model = self.model.to(self.task.device)
         self.model.eval()
 
-    def _reload_original_params(self):
+    def _reload_original_params(self) -> None:
         """Reload the initial parameters and buffers, given at the initialization stage."""
         self.model.load_state_dict(self.original_state_dict)
         self.model = self.model.to(self.task.device)
