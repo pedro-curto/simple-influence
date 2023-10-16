@@ -60,7 +60,7 @@ python evaluate/visualize_influences.py
 
 ### Running GLUE Experiments
 
-To initiate model training, follow the command below. Please be aware that this code has been tested for an A100 GPU with 80GB memory. For smaller GPUs, consider reducing the batch size:
+To initiate model training, follow the command below. Please be aware that this code has been tested on an A100 GPU with 80GB memory. For smaller GPUs, consider reducing the batch size:
 ```bash
 cd examples/glue
 python train.py
@@ -76,7 +76,7 @@ python evaluate/inspect_influences.py
 
 ### Running GPT-2 Experiments
 
-To initiate model training, follow the command below. Please be aware that this code has been tested for an A100 GPU with 80GB memory. For smaller GPUs, consider reducing the batch size:
+To initiate model training, follow the command below. Please be aware that this code has been tested on an A100 GPU with 80GB memory. For smaller GPUs, consider reducing the batch size:
 ```bash
 cd examples/wiki
 python train.py
