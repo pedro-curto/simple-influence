@@ -52,7 +52,7 @@ def train(
             num_iter += 1
 
             if save and num_iter % 375 == 0:
-                # This should yield 25 checkpoints.
+                # This should yield 5 checkpoints.
                 torch.save(
                     model.state_dict(),
                     f"files/checkpoints/{model_id}/{save_name}_iter_{num_iter}.pt",
