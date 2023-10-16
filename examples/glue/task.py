@@ -9,57 +9,6 @@ from src.abstract_task import AbstractTask
 BATCH_DTYPE = Dict[str, torch.Tensor]
 
 
-class TextClassificationModelOutput:
-    softmax: nn.Module = torch.nn.Softmax(-1)
-    loss_temperature: float = 1.0
-
-    @staticmethod
-    def get_output(
-        model,
-        weights: Dict[str, torch.Tensor],
-        buffers: Dict[str, torch.Tensor],
-        input_id: torch.Tensor,
-        token_type_id: torch.Tensor,
-        attention_mask: torch.Tensor,
-        label: torch.Tensor,
-    ) -> torch.Tensor:
-        logits = torch.func.functional_call(
-            model,
-            (weights, buffers),
-            args=(
-                input_id.unsqueeze(0),
-                token_type_id.unsqueeze(0),
-                attention_mask.unsqueeze(0),
-            ),
-        )
-        bindex = torch.arange(logits.shape[0]).to(logits.device, non_blocking=False)
-        logits_correct = logits[bindex, label.unsqueeze(0)]
-
-        cloned_logits = logits.clone()
-        cloned_logits[bindex, label.unsqueeze(0)] = torch.tensor(
-            -torch.inf, device=logits.device, dtype=logits.dtype
-        )
-
-        margins = logits_correct - cloned_logits.logsumexp(dim=-1)
-        return margins.sum()
-
-    def get_out_to_loss_grad(
-        self,
-        model: nn.Module,
-        weights: Dict[str, torch.Tensor],
-        buffers: Dict[str, torch.Tensor],
-        batch: BATCH_DTYPE,
-    ) -> torch.Tensor:
-        input_ids, token_type_ids, attention_mask, labels = batch
-        logits = torch.func.functional_call(
-            model, (weights, buffers), args=(input_ids, token_type_ids, attention_mask)
-        )
-        ps = self.softmax(logits / self.loss_temperature)[
-            torch.arange(logits.size(0)), labels
-        ]
-        return (1 - ps).clone().detach().unsqueeze(-1)
-
-
 class TextClassificationTask(AbstractTask):
     def __init__(
         self, device: torch.device = "cpu", generator: Optional[torch.Generator] = None
@@ -149,6 +98,3 @@ class TextClassificationTask(AbstractTask):
 
     def get_activation_masks(self, batch: Any) -> Optional[torch.Tensor]:
         return batch["attention_mask"].unsqueeze(-1).to(self.device)
-
-    def get_model_output(self) -> Optional[Any]:
-        return TextClassificationModelOutput()

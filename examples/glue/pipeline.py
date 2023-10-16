@@ -143,8 +143,6 @@ def get_dataloader(
     if split == "train" or split == "eval_train":
         train_dataset = raw_datasets["train"]
         ds = train_dataset
-        # We use 50_000 data points.
-        ds = ds.select(range(50_000))
     else:
         eval_dataset = raw_datasets["validation"]
         ds = eval_dataset

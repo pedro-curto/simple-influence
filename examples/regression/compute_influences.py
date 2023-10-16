@@ -14,7 +14,6 @@ from src.influence_function import InfluenceFunctionComputer
 from src.representation_similarity import RepresentationSimilarityComputer
 from src.tracin import TracinComputer
 
-TASK = "regression"
 BASE_PATH = "files/results"
 
 
@@ -172,8 +171,8 @@ def compute_tracin(data_name: str, model_ids: List[int]) -> None:
 
 
 if __name__ == "__main__":
-    data_names = ["concrete", "parkinsons"]
-    model_ids = [0, 1, 2, 3, 4]
+    data_names = ["concrete"]
+    model_ids = [0]
 
     for dn in data_names:
         compute_reps_similarity(data_name=dn, model_ids=model_ids)
