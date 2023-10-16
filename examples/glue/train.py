@@ -11,7 +11,7 @@ from accelerate import Accelerator
 from torch.nn import CrossEntropyLoss
 
 from examples.glue.pipeline import construct_model, get_loaders
-from examples.utils import set_seed
+from examples.utils import clear_gpu_cache, set_seed
 
 
 def train(
@@ -88,7 +88,8 @@ def model_evaluate(
 
 
 def main(
-    data_name: str = "qnli", num_train: int = 1,
+    data_name: str = "qnli",
+    num_train: int = 1,
 ) -> None:
     os.makedirs("files/", exist_ok=True)
     os.makedirs("files/checkpoints", exist_ok=True)
@@ -115,7 +116,7 @@ def main(
         _, valid_acc = model_evaluate(model=model, loader=valid_loader)
         print(f"Validation Accuracy: {valid_acc}")
         del model
-
+        clear_gpu_cache()
         print(f"Took {time.time() - start_time} seconds.")
 
 

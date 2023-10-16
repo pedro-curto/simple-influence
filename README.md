@@ -1,9 +1,7 @@
 # Influence Functions Prototype
 
-Note that this repository is currently in development for a public release and contains code related to active research projects.
+Note that this repository is currently in development for a public release (which plan to happen in early 2024) and contains code related to active research projects.
 Please ask if you would like to share the code.
-
-The public release of influence functions plan to happen late in 2023 (with 10x and above faster implementation that the code provided here).
 
 ## Getting Started
 
@@ -36,9 +34,9 @@ python train.py
 ```
 Upon completion of the training, you can evaluate all the baseline TDA methods by running:
 ```bash
-python compute_baselines.py
+python compute_influences.py
 ```
-For analysis of the influence distribution, I've provided a short script. You can execute it using:
+For analysis of the influence distribution, I have provided a short script. You can execute it using:
 ```bash
 cd evaluate
 python visualize_distribution.py
@@ -46,40 +44,54 @@ python visualize_distribution.py
 
 ### Running MNIST Experiments
 
-To train the model, you can run the following command:
+To initiate model training, execute the command below:
 ```bash
 cd examples/mnist
 python train.py
 ```
-When the training run finishes, you can run all baseline modules using the command:
+Upon completing the training, you can run influence functions with:
 ```bash
-python compute_baselines.py
+python compute_influences.py
 ```
-You can visualize the top influential training images by running:
+For visualization of the most influential training images, use:
 ```bash
-python evaluate/visualize_influence.py
+python evaluate/visualize_influences.py
 ```
 
 ### Running GLUE Experiments
 
-To train the model, you can run the following command:
+To initiate model training, follow the command below. Please be aware that this code has been tested for an A100 GPU with 80GB memory. For smaller GPUs, consider reducing the batch size:
 ```bash
 cd examples/glue
 python train.py
 ```
-When the training run finishes, you can run all baseline modules using the command:
+Upon completing the training, you can run influence function computations with:
 ```bash
-python compute_baselines.py
+python compute_influences.py
 ```
-You can print the top influential training sequences by running:
+To display the most influential training sequences, use:
 ```bash
-python evaluate/visualize_influence.py
+python evaluate/inspect_influences.py
 ```
 
 ### Running GPT-2 Experiments
 
+To initiate model training, follow the command below. Please be aware that this code has been tested for an A100 GPU with 80GB memory. For smaller GPUs, consider reducing the batch size:
+```bash
+cd examples/wiki
+python train.py
+```
+Upon completing the training, you can run influence function computations with:
+```bash
+python compute_influences.py
+```
+To display the most influential training sequences, use:
+```bash
+python evaluate/inspect_influences.py
+```
+
 ## Known Limitations
-1. EK-FAC influence computations only support `Linear`, `Conv2d`, `LayerNorm`, `BatchNorm2d`, and `Embedding` modules. For example, if the linear module is defined mantually, e.g.,
+1. EK-FAC influence calculations are only compatible with the following modules: `Linear`, `Conv2d`, `LayerNorm`, `BatchNorm2d`, and `Embedding`. If a module is manually defined - like the CustomLinear module shown below - it won't support EK-FAC statistics:
    ```python
    import torch.nn as nn
    import torch
@@ -92,8 +104,10 @@ python evaluate/visualize_influence.py
        def forward(self, inputs):
             return inputs @ self.weight
    ```
-   the EK-FAC factors will not be computed on them. Please change your module so that you use the above configurations.
-2. To approximate the true Fisher for EK-FAC influence computation, you require designing a custom loss function (where you need to sample the targets using the outputs). Some examples are provided in `examples/`.
-3. Several functionalities such as query batching or layerwise & tokenwise visualization is not yet supported.
+   It's important to adapt your module to leverage the above-supported modules. An example of how to adapt existing modules to support EK-FAC is provided in replace_conv1d_modules within `examples/wiki/pipeline.py`, where Huggingface's `Conv1D` module is substituted with the `nn.Linear` module.
+2. All TDA baseline techniques, including influence functions, are restricted to single GPU usage.
+3. To estimate the actual Fisher for EK-FAC influence computation, a tailored loss function is needed. This function should sample the targets utilizing the outputs. Several examples of this are available in `examples/`, but feel free to reach out for help with specific use cases.
+4. Some features like query batching, and layerwise & tokenwise visualization are currently not supported. However, I'm working on integrating these functionalities soon.
+
 ## Version Logs
-1. 2023/10/14: Initial implementation, supporting four examples `regression`, `mnist`, `glue`, and `wiki`.
+1. 2023/10/14: Initial implementation, supporting four examples `regression`, `mnist`, `glue`, and `wiki`. 

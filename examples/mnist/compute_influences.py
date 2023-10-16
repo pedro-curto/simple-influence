@@ -3,11 +3,8 @@ from typing import List
 
 import torch
 
+from examples.mnist.pipeline import construct_mlp, get_loaders
 from examples.mnist.task import ClassificationTask
-from examples.mnist.pipeline import (
-    construct_mlp,
-    get_loaders,
-)
 from src.gradient_similarity import GradientSimilarityComputer
 from src.influence_function import InfluenceFunctionComputer
 from src.representation_similarity import RepresentationSimilarityComputer
@@ -21,8 +18,7 @@ def prepare_everything(data_name: str, model_id: int = 0):
     os.makedirs(f"{BASE_PATH}/{model_id}", exist_ok=True)
 
     _, eval_train_loader, valid_loader = get_loaders(
-        data_name=data_name,
-        train_indices=None,
+        data_name=data_name, train_indices=None, valid_indices=list(range(16))
     )
 
     model = construct_mlp()
@@ -69,7 +65,8 @@ def compute_reps_similarity(data_name: str, model_ids: List[int]) -> None:
 
 
 def compute_grads_similarity(
-    data_name: str, model_ids: List[int],
+    data_name: str,
+    model_ids: List[int],
 ) -> None:
     for mid in model_ids:
         model, eval_train_loader, valid_loader, task = prepare_everything(

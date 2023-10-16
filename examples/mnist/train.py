@@ -98,12 +98,11 @@ def main(
         )
 
         loss, acc = evaluate(model, valid_loader)
-        del model
-
         print(f"Loss: {loss}")
         print(f"Accuracy: {acc}")
-        print(f"Took {time.time() - start_time} seconds.")
+        del model
         clear_gpu_cache()
+        print(f"Took {time.time() - start_time} seconds.")
 
 
 if __name__ == "__main__":

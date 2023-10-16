@@ -3,11 +3,8 @@ from typing import List
 
 import torch
 
+from examples.wiki.pipeline import construct_model, get_loaders
 from examples.wiki.task import LanguageModelTask
-from examples.wiki.pipeline import (
-    construct_model,
-    get_loaders,
-)
 from src.influence_function import InfluenceFunctionComputer
 
 BASE_PATH = "files/results"

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Union, List
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -48,7 +48,9 @@ class LanguageModelTask(AbstractTask):
             labels = batch["labels"].to(self.device)
             shift_labels = labels[..., 1:].contiguous()
             reshaped_shift_logits = shift_logits.view(-1, shift_logits.size(-1))
-            summed_loss = F.cross_entropy(reshaped_shift_logits, shift_labels.view(-1), reduction="sum")
+            summed_loss = F.cross_entropy(
+                reshaped_shift_logits, shift_labels.view(-1), reduction="sum"
+            )
         else:
             reshaped_shift_logits = shift_logits.view(-1, shift_logits.size(-1))
             with torch.no_grad():
@@ -56,7 +58,9 @@ class LanguageModelTask(AbstractTask):
                 sampled_labels = torch.multinomial(
                     probs, num_samples=1, generator=self.generator
                 ).flatten()
-            summed_loss = F.cross_entropy(reshaped_shift_logits, sampled_labels.detach(), reduction="sum")
+            summed_loss = F.cross_entropy(
+                reshaped_shift_logits, sampled_labels.detach(), reduction="sum"
+            )
 
         if reduction == "sum":
             return summed_loss
@@ -73,6 +77,7 @@ class LanguageModelTask(AbstractTask):
         sample: bool = False,
         reduction: str = "sum",
     ) -> torch.Tensor:
+        # Alternatively, we can provide the conditional log-likelihood (given the prompt and completion).
         return self.get_train_loss(
             model, batch, parameter_and_buffer_dicts, sample, reduction
         )

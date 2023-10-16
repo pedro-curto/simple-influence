@@ -174,7 +174,7 @@ class GradientSimilarityComputer(AbstractComputer):
             num_processed_test += test_batch_size
         return score_table
 
-    def compute_self_score_with_loader(
+    def compute_self_scores_with_loader(
         self,
         loader: torch.utils.data.DataLoader,
     ) -> torch.Tensor:

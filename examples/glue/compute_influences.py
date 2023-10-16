@@ -3,11 +3,8 @@ from typing import List
 
 import torch
 
+from examples.glue.pipeline import construct_model, get_loaders
 from examples.glue.task import TextClassificationTask
-from examples.glue.pipeline import (
-    construct_model,
-    get_loaders,
-)
 from src.influence_function import InfluenceFunctionComputer
 
 BASE_PATH = "files/results"

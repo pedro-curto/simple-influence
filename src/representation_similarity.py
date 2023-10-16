@@ -207,7 +207,7 @@ class RepresentationSimilarityComputer(AbstractComputer):
 
         return score_table
 
-    def compute_self_score_with_loader(
+    def compute_self_scores_with_loader(
         self,
         loader: torch.utils.data.DataLoader,
     ) -> None:

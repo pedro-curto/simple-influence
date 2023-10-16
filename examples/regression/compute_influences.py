@@ -85,7 +85,8 @@ def compute_reps_similarity(data_name: str, model_ids: List[int]) -> None:
 
 
 def compute_grads_similarity(
-    data_name: str, model_ids: List[int], do_corrupt: bool = False
+    data_name: str,
+    model_ids: List[int],
 ) -> None:
     for mid in model_ids:
         model, eval_train_loader, valid_loader, task = prepare_everything(
@@ -115,7 +116,7 @@ def compute_grads_similarity(
         torch.save(scores, f"{BASE_PATH}/{mid}/{expt_name}.pt")
 
 
-def compute_if(data_name: str, model_ids: List[int], do_corrupt: bool = False) -> None:
+def compute_if(data_name: str, model_ids: List[int]) -> None:
     for mid in model_ids:
         model, eval_train_loader, valid_loader, task = prepare_everything(
             data_name=data_name,
@@ -135,9 +136,7 @@ def compute_if(data_name: str, model_ids: List[int], do_corrupt: bool = False) -
         torch.save(scores, f"{BASE_PATH}/{mid}/{expt_name}.pt")
 
 
-def compute_tracin(
-    data_name: str, model_ids: List[int], do_corrupt: bool = False
-) -> None:
+def compute_tracin(data_name: str, model_ids: List[int]) -> None:
     hyper_dict = get_hyperparameters(data_name)
     lr = hyper_dict["lr"]
 

@@ -8,8 +8,8 @@ import torch.nn as nn
 from accelerate import Accelerator
 from torch.nn import CrossEntropyLoss
 
+from examples.utils import clear_gpu_cache, set_seed
 from examples.wiki.pipeline import construct_model, get_loaders
-from examples.utils import set_seed
 
 
 def train(
@@ -40,12 +40,12 @@ def train(
     for epoch in range(1, epochs + 1):
         for step, batch in enumerate(loader):
             optimizer.zero_grad()
-            lm_logits = model(
-                batch["input_ids"],  batch["attention_mask"]
-            )
+            lm_logits = model(batch["input_ids"], batch["attention_mask"])
             shift_logits = lm_logits[..., :-1, :].contiguous()
             shift_labels = batch["labels"][..., 1:].contiguous()
-            loss = loss_fn(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            loss = loss_fn(
+                shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
+            )
             loss.backward()
             optimizer.step()
 
@@ -57,29 +57,28 @@ def train(
     return model
 
 
-def model_evaluate(
-    model: nn.Module, loader: torch.utils.data.DataLoader
-) -> float:
+def model_evaluate(model: nn.Module, loader: torch.utils.data.DataLoader) -> float:
     model.eval()
     accelerator = Accelerator()
     loss_fn = CrossEntropyLoss(reduction="sum")
     loader = accelerator.prepare(loader)
-    total_loss, total_num = 0., 0
+    total_loss, total_num = 0.0, 0
     for step, batch in enumerate(loader):
         with torch.no_grad():
-            lm_logits = model(
-                batch["input_ids"],  batch["attention_mask"]
-            )
+            lm_logits = model(batch["input_ids"], batch["attention_mask"])
             shift_logits = lm_logits[..., :-1, :].contiguous()
             shift_labels = batch["labels"][..., 1:].contiguous()
             reshaped_shift_logits = shift_logits.view(-1, shift_logits.size(-1))
-            loss = loss_fn(reshaped_shift_logits, shift_labels.view(-1)).detach().float()
+            loss = (
+                loss_fn(reshaped_shift_logits, shift_labels.view(-1)).detach().float()
+            )
             total_loss += loss
         total_num += reshaped_shift_logits.shape[0]
     return total_loss.item() / total_num
 
 
-def main(num_train: int = 1,
+def main(
+    num_train: int = 1,
 ) -> None:
     os.makedirs("files/", exist_ok=True)
     os.makedirs("files/checkpoints", exist_ok=True)
@@ -105,7 +104,7 @@ def main(num_train: int = 1,
         print(f"Validation Loss: {loss}")
         print(f"Validation Perplexity: {math.exp(loss)}")
         del model
-
+        clear_gpu_cache()
         print(f"Took {time.time() - start_time} seconds.")
 
 

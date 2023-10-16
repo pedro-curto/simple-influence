@@ -103,6 +103,20 @@ class TracinComputer(AbstractComputer):
         checkpoints: List[str],
         lrs: Union[int, float, List[int], List[float]] = 1.0,
     ) -> torch.Tensor:
+        """Compute pairwise similarity scores between `test_loader` and `train_loader`.
+
+        Args:
+            test_loader (object):
+                The loader with test dataset.
+            train_loader (object):
+                The loader with training dataset.
+            checkpoints (list):
+                A list of paths to the checkpoints.
+            lrs (list, float):
+                Learning rates used for the checkpoints. If a single float is provided,
+                it is assumed that the learning rate was fixed for all checkpoints. Otherwise,
+                provide a list of floats with the same size as the list of checkpoints.
+        """
         self.model.eval()
 
         score_table = torch.zeros(
@@ -131,12 +145,24 @@ class TracinComputer(AbstractComputer):
         self._reload_original_params()
         return score_table
 
-    def compute_self_score_with_loader(
+    def compute_self_scores_with_loader(
         self,
         loader: torch.utils.data.DataLoader,
         checkpoints: List[str],
         lrs: Union[int, float, List[int], List[float]] = 1.0,
     ) -> torch.Tensor:
+        """Compute self-similarity scores of all data points in `loader`.
+
+        Args:
+            loader (DataLoader):
+                The loader for which self-similarity scores are computed.
+            checkpoints (list):
+                A list of paths to the checkpoints.
+            lrs (list, float):
+                Learning rates used for the checkpoints. If a single float is provided,
+                it is assumed that the learning rate was fixed for all checkpoints. Otherwise,
+                provide a list of floats with the same size as the list of checkpoints.
+        """
         self.model.eval()
 
         # Perform lazy initialization.

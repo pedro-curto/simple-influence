@@ -120,7 +120,7 @@ def test_gradients_similarity(test_name: str) -> None:
             )
 
         if metric == "dot":
-            self_scores = computer.compute_self_score_with_loader(loader=train_loader)
+            self_scores = computer.compute_self_scores_with_loader(loader=train_loader)
             assert torch.allclose(self_scores, torch.diag(scores), rtol=RTOL, atol=ATOL)
 
             assert not torch.allclose(
