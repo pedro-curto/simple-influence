@@ -104,7 +104,7 @@ python evaluate/inspect_influences.py
        def forward(self, inputs):
             return inputs @ self.weight
    ```
-   It's important to adapt your module to leverage the above-supported modules. An example of how to adapt existing modules to support EK-FAC is provided in replace_conv1d_modules within `examples/wiki/pipeline.py`, where Huggingface's `Conv1D` module is substituted with the `nn.Linear` module.
+   It's important to adapt your module to leverage the above-supported modules. An example of how to adapt existing modules to support EK-FAC is provided in `replace_conv1d_modules` within `examples/wiki/pipeline.py`, where Huggingface's `Conv1D` module is substituted with the `nn.Linear` module.
 2. All TDA baseline techniques, including influence functions, are restricted to single GPU usage.
 3. To estimate the actual Fisher for EK-FAC influence computation, a tailored loss function is needed. This function should sample the targets utilizing the outputs. Several examples of this are available in `examples/`, but feel free to reach out for help with specific use cases.
 4. Some features like query batching, and layerwise & tokenwise visualization are currently not supported. However, I'm working on integrating these functionalities soon.
