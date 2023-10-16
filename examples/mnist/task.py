@@ -63,7 +63,7 @@ class ClassificationTask(AbstractTask):
         return images.shape[0]
 
     def influence_modules(self) -> List[str]:
-        return ["0", "2", "4", "6"]
+        return ["1", "3", "5", "7"]
 
     def representation_modules(self) -> str:
-        return "4"
+        return "5"

@@ -124,6 +124,4 @@ if __name__ == "__main__":
     model_ids = [0]
 
     for dn in data_names:
-        compute_reps_similarity(data_name=dn, model_ids=model_ids)
-        compute_grads_similarity(data_name=dn, model_ids=model_ids)
         compute_if(data_name=dn, model_ids=model_ids)
