@@ -33,7 +33,7 @@ def train(
     epochs = 3
 
     num_update_steps_per_epoch = math.ceil(len(loader))
-    accelerator = Accelerator(cpu=True)
+    accelerator = Accelerator()
     model, optimizer, loader = accelerator.prepare(model, optimizer, loader)
     assert math.ceil(len(loader)) == num_update_steps_per_epoch
 
