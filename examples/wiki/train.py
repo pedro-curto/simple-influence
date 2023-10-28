@@ -5,6 +5,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
+from tqdm import trange, tqdm
 from accelerate import Accelerator
 from torch.nn import CrossEntropyLoss
 
@@ -32,13 +33,13 @@ def train(
     epochs = 3
 
     num_update_steps_per_epoch = math.ceil(len(loader))
-    accelerator = Accelerator(cpu=True)
+    accelerator = Accelerator()
     model, optimizer, loader = accelerator.prepare(model, optimizer, loader)
     assert math.ceil(len(loader)) == num_update_steps_per_epoch
 
     model.train()
-    for epoch in range(1, epochs + 1):
-        for step, batch in enumerate(loader):
+    for epoch in trange(1, epochs + 1):
+        for step, batch in tqdm(enumerate(loader), total=num_update_steps_per_epoch):
             optimizer.zero_grad()
             lm_logits = model(batch["input_ids"], batch["attention_mask"])
             shift_logits = lm_logits[..., :-1, :].contiguous()
@@ -49,11 +50,11 @@ def train(
             loss.backward()
             optimizer.step()
 
-            if save:
-                torch.save(
-                    model.state_dict(),
-                    f"files/checkpoints/{model_id}/{save_name}_epoch_{epoch}.pt",
-                )
+        if save:
+            torch.save(
+                model.state_dict(),
+                f"files/checkpoints/{model_id}/{save_name}_epoch_{epoch}.pt",
+            )
     return model
 
 

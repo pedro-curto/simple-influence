@@ -101,7 +101,7 @@ class LanguageModelTask(AbstractTask):
         return total_modules
 
     def representation_module(self) -> str:
-        return "model.transformer.h.11.ln_f"
+        return "model.transformer.ln_f"
 
     def get_activation_masks(self, batch: Any) -> Optional[torch.Tensor]:
         return batch["attention_mask"].unsqueeze(-1).to(self.device)
