@@ -5,6 +5,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
+from tqdm import trange, tqdm
 from accelerate import Accelerator
 from torch.nn import CrossEntropyLoss
 
@@ -37,8 +38,8 @@ def train(
     assert math.ceil(len(loader)) == num_update_steps_per_epoch
 
     model.train()
-    for epoch in range(1, epochs + 1):
-        for step, batch in enumerate(loader):
+    for epoch in trange(1, epochs + 1):
+        for step, batch in tqdm(enumerate(loader), total=num_update_steps_per_epoch):
             optimizer.zero_grad()
             lm_logits = model(batch["input_ids"], batch["attention_mask"])
             shift_logits = lm_logits[..., :-1, :].contiguous()
