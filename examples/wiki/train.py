@@ -50,11 +50,11 @@ def train(
             loss.backward()
             optimizer.step()
 
-            if save:
-                torch.save(
-                    model.state_dict(),
-                    f"files/checkpoints/{model_id}/{save_name}_epoch_{epoch}.pt",
-                )
+        if save:
+            torch.save(
+                model.state_dict(),
+                f"files/checkpoints/{model_id}/{save_name}_epoch_{epoch}.pt",
+            )
     return model
 
 
