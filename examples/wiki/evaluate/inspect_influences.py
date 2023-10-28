@@ -1,7 +1,28 @@
 import torch
 from transformers import AutoTokenizer
+from tqdm import trange, tqdm
 
 from examples.wiki.pipeline import get_loaders
+
+def find_largest_ngram_overlap(str1, str2):
+    len_str1, len_str2 = len(str1), len(str2)
+    table = [[0] * (len_str2 + 1) for _ in range(len_str1 + 1)]
+    longest = 0
+    l_end = 0
+
+    for i in range(1, len_str1 + 1, desc="Finding largest ngram overlap"):
+        for j in range(1, len_str2 + 1):
+            if str1[i - 1] == str2[j - 1]:
+                table[i][j] = table[i - 1][j - 1] + 1
+                if table[i][j] > longest:
+                    longest = table[i][j]
+                    l_end = i
+            else:
+                table[i][j] = 0
+
+    if longest == 0:
+        return ""
+    return str1[l_end - longest: l_end]
 
 
 def main(model_id: int = 0):
@@ -20,15 +41,18 @@ def main(model_id: int = 0):
         print("=" * 80)
         print(f"{i}th data point")
         print("Sequence:")
-        print(tokenizer.decode(valid_loader.dataset[i]["input_ids"]))
+        querry_sequence = tokenizer.decode(valid_loader.dataset[i]["input_ids"])
+        print(querry_sequence)
 
         print("Most influential data point")
         rank = torch.argsort(scores[i], descending=True)
-        for j in range(1):
+        for j in range(3):
+            influential_sequence = tokenizer.decode(eval_train_loader.dataset[int(rank[j])]["input_ids"])
+            overlap = find_largest_ngram_overlap(querry_sequence, influential_sequence)
+            print("-" * 80)
             print(f"Rank {j} (score = {scores[i][rank[j]]})")
-            print(
-                tokenizer.decode(eval_train_loader.dataset[int(rank[j])]["input_ids"])
-            )
+            print(f"Overlap: {overlap}")
+            print(f"Influential Sequence: {influential_sequence}")
 
 
 if __name__ == "__main__":
