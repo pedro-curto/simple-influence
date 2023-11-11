@@ -90,6 +90,20 @@ To display the most influential training sequences, use:
 python evaluate/inspect_influences.py
 ```
 
+## Getting Started with Development
+1. Install the optional development dependencies:
+    ```bash
+    pip install -e '.[dev]'
+    ```
+2. Install the pre-commit hooks:
+    ```bash
+    pre-commit install
+    ```
+3. Run the tests to verify that everything is functioning correctly:
+    ```bash
+    pytest
+    ```
+
 ## Known Limitations
 1. EK-FAC influence calculations are only compatible with the following modules: `Linear`, `Conv2d`, `LayerNorm`, `BatchNorm2d`, and `Embedding`. If a module is manually defined - like the CustomLinear module shown below - it won't support EK-FAC statistics:
    ```python
