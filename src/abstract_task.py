@@ -78,6 +78,7 @@ class AbstractTask(ABC):
         parameter_and_buffer_dicts: Optional[
             Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]
         ] = None,
+        sample: bool = False,
         reduction: str = "sum",
     ) -> torch.Tensor:
         """Computes the measurement (e.g., loss, margin, conditional log probability) for a given model and batch.
@@ -92,6 +93,7 @@ class AbstractTask(ABC):
             parameter_and_buffer_dicts (tuple, optional):
                 Instead of relying on the model's inherent parameters (given by `model.parameters()`),
                 specific parameters can be directly provided for measurement computation.
+            sample (bool): If set to True, labels are sampled from the outputs; otherwise, the actual label is used.
             reduction (str):
                 Determines the type of output. By default, it returns the cumulative loss. To alter
                 this behavior, specify either 'average' (for the mean loss) or 'none'
