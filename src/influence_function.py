@@ -133,7 +133,7 @@ class InfluenceFunctionComputer(AbstractComputer):
         with torch.no_grad():
             module_name = self._module_to_name[module]
             acts = extract_activations(
-                inputs[0].data.to(dtype=self.stats_dtype),
+                inputs[0].to(dtype=self.stats_dtype),
                 module,
                 self._activation_masks,
             ).to(dtype=self.stats_dtype)
@@ -157,7 +157,7 @@ class InfluenceFunctionComputer(AbstractComputer):
         with torch.no_grad():
             module_name = self._module_to_name[module]
             pseudograds = extract_gradients(
-                grad_outputs[0].data.to(dtype=self.stats_dtype), module
+                grad_outputs[0].to(dtype=self.stats_dtype), module
             ).to(dtype=self.stats_dtype)
             if module_name not in self.pseudograd_cov:
                 last_dim = pseudograds.shape[-1]
