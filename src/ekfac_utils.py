@@ -122,7 +122,7 @@ def extract_activations(
             activations_mask is not None
             and activations_mask.shape[:-1] == activations.shape[:-1]
         ):
-            activations *= activations_mask
+            activations = activations * activations_mask
         reshaped_activations = activations.reshape(-1, activations.shape[-1])
         if module.bias is not None:
             shape = list(reshaped_activations.shape[:-1]) + [1]
@@ -131,7 +131,7 @@ def extract_activations(
                 activations_mask is not None
                 and activations_mask.shape[:-1] == activations.shape[:-1]
             ):
-                append_term *= activations_mask.view(-1, 1)
+                append_term = append_term * activations_mask.view(-1, 1)
             reshaped_activations = torch.cat(
                 [reshaped_activations, append_term], dim=-1
             )
