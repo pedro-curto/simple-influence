@@ -5,9 +5,9 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from tqdm import trange, tqdm
 from accelerate import Accelerator
 from torch.nn import CrossEntropyLoss
+from tqdm import tqdm, trange
 
 from examples.utils import clear_gpu_cache, set_seed
 from examples.wiki.pipeline import construct_model, get_loaders

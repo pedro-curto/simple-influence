@@ -50,7 +50,7 @@ def compute_if(model_ids: List[int]) -> None:
         scores = ekfac.compute_scores_with_loader(
             test_loader=valid_loader, train_loader=eval_train_loader
         )
-        expt_name = f"wiki_if"
+        expt_name = "wiki_if"
         torch.save(scores, f"{BASE_PATH}/{mid}/{expt_name}.pt")
 
 
