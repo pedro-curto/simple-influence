@@ -1,6 +1,6 @@
-# Influence Functions Prototype
+# Simple Influence
 
-A lightweight prototype for trying out **training data attribution (TDA)** methods on PyTorch
+A lightweight library for trying out **training data attribution (TDA)** methods on PyTorch
 models. Implements:
 
 - **Influence functions** with EK-FAC curvature approximation (Grosse et al. 2023)
@@ -13,24 +13,22 @@ classification, GLUE, and GPT-2 language modeling).
 
 ## Getting Started
 
-To begin, follow these steps to set up your environment:
-
 1. Create a new Conda environment:
     ```bash
-    conda create -n influence_functions_env python=3.10
-    conda activate influence_functions_env
+    conda create -n simple_influence python=3.10
+    conda activate simple_influence
     ```
-2. Install this package and its dependencies within the newly created environment (if you are working on a machine without a GPU, you can choose the `pytorch_cpu` option instead):
+2. Install the package and its dependencies (use the `pytorch_cpu` extra if you don't have a GPU):
     ```bash
     pip install -e '.[pytorch_gpu]' -f 'https://download.pytorch.org/whl/torch_stable.html'
     ```
    PyTorch `>=2.0.0` is required (the EK-FAC implementation uses `torch.func` / `functorch`).
-3. To verify that everything is functioning correctly, run the test suite:
+3. Run the test suite to verify the install:
     ```bash
     pytest tests/
     ```
-   The non-smoke tests run on CPU and only depend on synthetic data. To also run the slower
-   GLUE/Wiki smoke tests, use `pytest -m smoke tests/`.
+   The non-smoke tests run on CPU against synthetic data. To also run the slower GLUE/Wiki
+   smoke tests, use `pytest -m smoke tests/`.
 
 ## Quickstart
 
@@ -83,10 +81,15 @@ hand-tuned. Currently only `Linear` and `Conv2d` modules are supported by `Sourc
 
 ## Running the examples
 
-All example scripts use absolute imports (`from examples.mnist.pipeline import ...`),
-so they must be run as Python modules from the **project root** — not by `cd`-ing
-into the example directory. Each example writes / reads relative paths under
-`examples/<name>/files/`, so first `cd` into the example directory.
+Example scripts use absolute imports (`from examples.mnist.pipeline import ...`) and also
+read/write paths relative to the example directory (`files/checkpoints/`, `files/results/`).
+The easiest way to run them is to `cd` into the example directory and point `PYTHONPATH` at
+the project root so the imports resolve:
+
+```bash
+cd examples/mnist
+PYTHONPATH=../.. python -m examples.mnist.train
+```
 
 ### Regression
 
@@ -94,27 +97,26 @@ CPU-only (small enough that GPU has no benefit):
 
 ```bash
 cd examples/regression
-python -m examples.regression.train               # writes checkpoints under files/checkpoints/
-python -m examples.regression.compute_influences  # writes scores under files/results/
-python -m examples.regression.evaluate.visualize_distribution
+PYTHONPATH=../.. python -m examples.regression.train               # writes files/checkpoints/
+PYTHONPATH=../.. python -m examples.regression.compute_influences  # writes files/results/
+PYTHONPATH=../.. python -m examples.regression.evaluate.visualize_distribution
 ```
 
 ### MNIST
 
 ```bash
 cd examples/mnist
-python -m examples.mnist.train
-python -m examples.mnist.compute_influences        # IF + SOURCE
-python -m examples.mnist.evaluate.visualize_influences
-```
+PYTHONPATH=../.. python -m examples.mnist.train
+PYTHONPATH=../.. python -m examples.mnist.compute_influences        # IF + SOURCE
+PYTHONPATH=../.. python -m examples.mnist.evaluate.visualize_influences
 ```
 
-A small end-to-end smoke test (~1 minute on CPU) that trains briefly and runs
-both IF and SOURCE on the result:
+A small end-to-end smoke test (~1 minute on CPU) that trains briefly and runs both IF and
+SOURCE on the result:
 
 ```bash
 cd examples/mnist
-PYTHONPATH=$(pwd)/../.. python smoke_test_source.py
+PYTHONPATH=../.. python smoke_test_source.py
 ```
 
 ### GLUE (BERT)
@@ -123,9 +125,9 @@ Tested on an A100 80GB; reduce batch size for smaller GPUs.
 
 ```bash
 cd examples/glue
-python -m examples.glue.train
-python -m examples.glue.compute_influences
-python -m examples.glue.evaluate.inspect_influences
+PYTHONPATH=../.. python -m examples.glue.train
+PYTHONPATH=../.. python -m examples.glue.compute_influences
+PYTHONPATH=../.. python -m examples.glue.evaluate.inspect_influences
 ```
 
 ### WikiText-2 (GPT-2)
@@ -134,12 +136,13 @@ Tested on an A100 80GB; reduce batch size for smaller GPUs.
 
 ```bash
 cd examples/wiki
-python -m examples.wiki.train
-python -m examples.wiki.compute_influences
-python -m examples.wiki.evaluate.inspect_influences
+PYTHONPATH=../.. python -m examples.wiki.train
+PYTHONPATH=../.. python -m examples.wiki.compute_influences
+PYTHONPATH=../.. python -m examples.wiki.evaluate.inspect_influences
 ```
 
 ## Getting Started with Development
+
 1. Install the optional development dependencies:
     ```bash
     pip install -e '.[dev]'
@@ -153,24 +156,41 @@ python -m examples.wiki.evaluate.inspect_influences
     pytest
     ```
 
+## Looking for production-grade influence functions?
+
+This library is intentionally minimal — it's a clean reference implementation aimed at making
+the methods easy to read and adapt. For a production-grade implementation with query batching,
+layer-wise and token-wise score breakdowns, multi-GPU support, and many more features, see
+[**Kronfluence**](https://github.com/pomonam/kronfluence).
+
 ## Known Limitations
-1. EK-FAC influence calculations are only compatible with the following modules: `Linear`, `Conv2d`, `LayerNorm`, `BatchNorm2d`, and `Embedding`. If a module is manually defined - like the CustomLinear module shown below - it won't support EK-FAC statistics:
+
+1. EK-FAC influence calculations are only compatible with the following modules: `Linear`,
+   `Conv2d`, `LayerNorm`, `BatchNorm2d`, and `Embedding`. Custom modules that hold parameters
+   directly (rather than wrapping one of the supported layers) won't have EK-FAC statistics
+   collected for them:
    ```python
    import torch.nn as nn
    import torch
-   
+
    class CustomLinear(nn.Module):
        def __init__(self, num_inputs, num_outputs):
            super().__init__()
            self.weight = nn.Parameter(torch.Tensor((num_inputs, num_outputs)))
-   
+
        def forward(self, inputs):
             return inputs @ self.weight
    ```
-   It's important to adapt your module to leverage the above-supported modules. An example of how to adapt existing modules to support EK-FAC is provided in `replace_conv1d_modules` within `examples/wiki/pipeline.py`, where Huggingface's `Conv1D` module is substituted with the `nn.Linear` module.
-2. All TDA baseline techniques, including influence functions, are restricted to single GPU usage.
-3. To estimate the actual Fisher for EK-FAC influence computation, a tailored loss function is needed. This function should sample the targets utilizing the outputs. Several examples of this are available in `examples/`, but feel free to reach out for help with specific use cases.
-4. Some features like query batching, and layerwise & tokenwise visualization are currently not supported. However, I'm working on integrating these functionalities soon.
+   Replace these with one of the supported modules — see `replace_conv1d_modules` in
+   `examples/wiki/pipeline.py` for a worked example (HuggingFace's `Conv1D` -> `nn.Linear`).
+2. All TDA computers in this library are single-GPU.
+3. To estimate the true Fisher for EK-FAC, the task's loss function must sample targets from
+   the model output (see `examples/` for several worked examples).
+4. `SourceComputer` currently supports only `Linear` and `Conv2d` modules — the LayerNorm /
+   BatchNorm "full" and Embedding "diagonal" Fisher branches don't yet have a closed-form
+   matrix function for the SOURCE preconditioner.
 
 ## Version Logs
-1. 2023/10/14: Initial implementation, supporting four examples `regression`, `mnist`, `glue`, and `wiki`. 
+
+1. 2023/10/14: Initial implementation, supporting four examples: `regression`, `mnist`, `glue`, `wiki`.
+2. 2024-06: Added `SourceComputer` (Bae et al. 2024); standardized docstrings; bug fixes.
