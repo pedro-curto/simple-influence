@@ -9,17 +9,13 @@ Run from `examples/mnist/`:
     python smoke_test_source.py
 """
 
-import math
 import os
-import shutil
 
 import torch
-import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 from torch.optim import SGD
 
-from examples.mnist.compute_influences import _build_source_segments
-from examples.mnist.pipeline import construct_mlp, get_loaders
+from examples.mnist.pipeline import construct_mlp, get_mnist_dataloader
 from examples.mnist.task import ClassificationTask
 from examples.utils import set_seed
 from src.influence_function import InfluenceFunctionComputer
@@ -27,14 +23,20 @@ from src.source import SourceComputer
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Small smoke-test config.
+# Smoke-test config. The training loader iterates over the first
+# `NUM_TRAIN_SUBSET` MNIST examples (large enough that batches actually run
+# under `drop_last=True`); the EK-FAC / attribution loader iterates over the
+# first `NUM_EVAL_TRAIN_SUBSET` examples so we don't end up with a
+# `(NUM_TRAIN_SUBSET x NUM_TRAIN_SUBSET)` score table.
 EPOCHS = 4
-BATCH_SIZE = 512
+TRAIN_BATCH_SIZE = 128
+NUM_TRAIN_SUBSET = 4096      # enough for 32 batches/epoch -> 128 training iterations
+NUM_EVAL_TRAIN_SUBSET = 256  # subset used as both "training data" for EK-FAC and the
+                             # train side of the score table
+NUM_VALID = 8
 LR = 0.03
 MOMENTUM = 0.9
 WEIGHT_DECAY = 1e-4
-NUM_VALID = 8
-NUM_EVAL_TRAIN_SUBSET = 256  # cap training-set evaluation to keep things fast
 CKPT_DIR = "files/checkpoints/0"
 
 
@@ -70,16 +72,34 @@ def main() -> None:
     """Train briefly and run both IF and SOURCE; print summary statistics."""
     print(f"Device: {DEVICE}")
 
-    # Build loaders. `eval_train_loader` is intentionally restricted to a
-    # subset for speed — see `prepare_test`-style indexing.
-    train_loader, eval_train_loader, valid_loader = get_loaders(
-        data_name="mnist",
-        eval_batch_size=128,
-        train_indices=list(range(NUM_EVAL_TRAIN_SUBSET)),
-        valid_indices=list(range(NUM_VALID)),
+    # Three independent loaders so the training subset (~4k examples) is large
+    # enough for `drop_last=True` to actually yield batches, while the
+    # EK-FAC / attribution loader stays small (~256 examples) so the score
+    # table is cheap to compute.
+    train_loader = get_mnist_dataloader(
+        batch_size=TRAIN_BATCH_SIZE,
+        split="train",
+        indices=list(range(NUM_TRAIN_SUBSET)),
+    )
+    eval_train_loader = get_mnist_dataloader(
+        batch_size=128,
+        split="eval_train",
+        indices=list(range(NUM_EVAL_TRAIN_SUBSET)),
+    )
+    valid_loader = get_mnist_dataloader(
+        batch_size=128,
+        split="valid",
+        indices=list(range(NUM_VALID)),
+    )
+    assert len(train_loader) > 0, (
+        "Training loader yields no batches - NUM_TRAIN_SUBSET is too small for the "
+        "current TRAIN_BATCH_SIZE with drop_last=True."
     )
 
-    print(f"Training MLP for {EPOCHS} epochs on the FULL MNIST training set...")
+    print(
+        f"Training MLP for {EPOCHS} epochs on {NUM_TRAIN_SUBSET} MNIST examples "
+        f"({len(train_loader)} batches/epoch)..."
+    )
     model = train_and_save(loader=train_loader)
 
     # --- Influence functions, for comparison ---
@@ -105,13 +125,12 @@ def main() -> None:
     epochs_per_segment = [[1, 2], [3, 4]]
     boundaries = [0, EPOCHS // 2, EPOCHS]
 
-    # `K_l` reflects the training schedule (60k examples, drop_last=True with
-    # batch size 512 -> 117 iters/epoch), NOT the size of the EK-FAC
-    # evaluation subset. Getting this wrong puts the damping
-    # `lambda = 1 / (K_l * eta_l)` far off the IF heuristic and the two
-    # methods diverge.
-    train_set_size = 60_000  # full MNIST training set used by `train_loader`
-    iters_per_epoch = max(1, train_set_size // BATCH_SIZE)
+    # `K_l` reflects the actual training schedule the checkpoints sit on top
+    # of (number of gradient updates per epoch on the smoke-test training
+    # subset), NOT the size of the EK-FAC evaluation subset. Getting this
+    # wrong puts the damping `lambda = 1 / (K_l * eta_l)` far off the IF
+    # heuristic and the two methods diverge for the wrong reason.
+    iters_per_epoch = len(train_loader)
     iters_per_segment = [
         (boundaries[i + 1] - boundaries[i]) * iters_per_epoch
         for i in range(num_segments)
@@ -142,7 +161,7 @@ def main() -> None:
     assert torch.isfinite(source_scores).all()
 
     # Rank-overlap with IF. SOURCE is *designed* to differ from IF on
-    # non-converged models (paper Fig 7) — for 4-epoch MNIST a meaningful
+    # non-converged models (paper Fig 7) - for 4-epoch MNIST a meaningful
     # divergence is expected, not a bug.
     from scipy.stats import spearmanr  # local to keep it optional
 

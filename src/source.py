@@ -439,7 +439,8 @@ class SourceComputer(AbstractComputer):
         for test_batch in test_loader:
             test_batch_size = self.task.get_batch_size(test_batch)
             self.logger.info(
-                f"Processed {num_processed_test} test data points (out of {num_test})."
+                f"Processing test batch [{num_processed_test}, "
+                f"{num_processed_test + test_batch_size}) of {num_test}."
             )
 
             # Query gradient at the final parameters theta_s. Same convention as
@@ -532,7 +533,7 @@ class SourceComputer(AbstractComputer):
 
         For each checkpoint in the segment we load its parameters, compute
         per-sample training-loss gradients on the train loader, and accumulate
-        `<preconditioned_query, train_grad>` into the score table — divided by
+        `<preconditioned_query, train_grad>` into the score table - divided by
         the number of checkpoints in the segment so we end up with the segment's
         averaged gradient as required by SOURCE.
         """

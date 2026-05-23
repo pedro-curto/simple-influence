@@ -77,7 +77,7 @@ class AbstractTask(ABC):
                 Model to evaluate.
             batch (Any):
                 A single batch yielded by the data loader. The exact type
-                depends on the task — tuples for vision tasks, dicts for
+                depends on the task - tuples for vision tasks, dicts for
                 transformer tasks, etc.
             parameter_and_buffer_dicts (tuple, optional):
                 If provided, a `(params, buffers)` pair used in place of
