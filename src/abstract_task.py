@@ -235,7 +235,9 @@ def validate_task(
     # module"; in that case there's nothing to validate against an explicit list.
     influence_modules_list = task.influence_modules()
     influence_module_exists_dict: Dict[str, bool] = (
-        {} if influence_modules_list is None else {name: False for name in influence_modules_list}
+        {}
+        if influence_modules_list is None
+        else {name: False for name in influence_modules_list}
     )
 
     # `representation_module()` is only required for representation-similarity
@@ -271,11 +273,11 @@ def validate_task(
         if representation_module is not None and representation_module == name:
             representation_module_exists = True
 
-    missing_modules = [name for name, found in influence_module_exists_dict.items() if not found]
+    missing_modules = [
+        name for name, found in influence_module_exists_dict.items() if not found
+    ]
     if missing_modules:
-        error_msg = (
-            f"Some provided influence modules were not found in the model: {missing_modules}."
-        )
+        error_msg = f"Some provided influence modules were not found in the model: {missing_modules}."
         if logger is not None:
             logger.error(error_msg)
         raise InvalidTaskError(error_msg)

@@ -203,7 +203,10 @@ def _equal_segment_boundaries(total_epochs: int, num_segments: int) -> List[int]
     Returns:
         List[int]: sorted boundaries of length ``num_segments + 1``.
     """
-    return [int(math.floor(total_epochs * i / num_segments)) for i in range(num_segments + 1)]
+    return [
+        int(math.floor(total_epochs * i / num_segments))
+        for i in range(num_segments + 1)
+    ]
 
 
 def compute_source(
@@ -235,7 +238,10 @@ def compute_source(
             start, end = boundaries[i], boundaries[i + 1]
             # Pick the 1/3 and 2/3 points within the segment, then round to
             # an integer epoch in [start + 1, end].
-            picks = [start + max(1, (end - start) // 3), start + max(1, 2 * (end - start) // 3)]
+            picks = [
+                start + max(1, (end - start) // 3),
+                start + max(1, 2 * (end - start) // 3),
+            ]
             picks = sorted(set(min(end, max(start + 1, p)) for p in picks))
             epochs_per_segment.append(picks)
 
@@ -245,7 +251,11 @@ def compute_source(
             model_id=mid,
         )
 
-        checkpoints_per_segment, iters_per_segment, lrs_per_segment = _build_source_segments(
+        (
+            checkpoints_per_segment,
+            iters_per_segment,
+            lrs_per_segment,
+        ) = _build_source_segments(
             data_name=data_name,
             model_id=mid,
             num_segments=num_segments,

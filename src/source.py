@@ -194,9 +194,7 @@ class SourceComputer(AbstractComputer):
 
     # ------------------------------------------------------------------ curvature
 
-    def build_curvature_blocks(
-        self, loader: torch.utils.data.DataLoader
-    ) -> None:
+    def build_curvature_blocks(self, loader: torch.utils.data.DataLoader) -> None:
         """Build per-segment averaged EK-FAC factors.
 
         For each segment l, this:
@@ -294,12 +292,12 @@ class SourceComputer(AbstractComputer):
                 # `ckpt_ifc` would otherwise pick up.
                 with torch.no_grad():
                     for name in kronecker_module_names:
-                        ckpt_ifc.activation_cov_eigvecs[name] = seg_ifc.activation_cov_eigvecs[
+                        ckpt_ifc.activation_cov_eigvecs[
                             name
-                        ]
-                        ckpt_ifc.pseudograd_cov_eigvecs[name] = seg_ifc.pseudograd_cov_eigvecs[
+                        ] = seg_ifc.activation_cov_eigvecs[name]
+                        ckpt_ifc.pseudograd_cov_eigvecs[
                             name
-                        ]
+                        ] = seg_ifc.pseudograd_cov_eigvecs[name]
                 ckpt_ifc.fit_additional_factors(loader=loader)
                 with torch.no_grad():
                     for name in kronecker_module_names:
@@ -313,12 +311,12 @@ class SourceComputer(AbstractComputer):
             seg_factors.modules = kronecker_modules
             with torch.no_grad():
                 for name in kronecker_module_names:
-                    seg_factors.activation_cov_eigvecs[name] = seg_ifc.activation_cov_eigvecs[
+                    seg_factors.activation_cov_eigvecs[
                         name
-                    ]
-                    seg_factors.pseudograd_cov_eigvecs[name] = seg_ifc.pseudograd_cov_eigvecs[
+                    ] = seg_ifc.activation_cov_eigvecs[name]
+                    seg_factors.pseudograd_cov_eigvecs[
                         name
-                    ]
+                    ] = seg_ifc.pseudograd_cov_eigvecs[name]
                     seg_factors.kronecker_eigvals[name] = (
                         torch.stack(lambda_acc[name]).mean(0).to(device=device)
                     )
@@ -384,7 +382,10 @@ class SourceComputer(AbstractComputer):
     # ------------------------------------------------------------------ scoring
 
     def _measurement_grads_dict(
-        self, batch: Any, params: Dict[str, torch.Tensor], buffers: Dict[str, torch.Tensor]
+        self,
+        batch: Any,
+        params: Dict[str, torch.Tensor],
+        buffers: Dict[str, torch.Tensor],
     ) -> Dict[str, torch.Tensor]:
         """Per-sample measurement gradients via `torch.func.vmap`."""
         grad_fn = self._compute_measurement_grad()
@@ -393,7 +394,10 @@ class SourceComputer(AbstractComputer):
         )(params, buffers, batch)
 
     def _train_loss_grads_dict(
-        self, batch: Any, params: Dict[str, torch.Tensor], buffers: Dict[str, torch.Tensor]
+        self,
+        batch: Any,
+        params: Dict[str, torch.Tensor],
+        buffers: Dict[str, torch.Tensor],
     ) -> Dict[str, torch.Tensor]:
         """Per-sample training-loss gradients via `torch.func.vmap`."""
         grad_fn = self._compute_train_loss_grad()
@@ -479,10 +483,14 @@ class SourceComputer(AbstractComputer):
                 eta = self.lrs_per_segment[seg_idx]
                 k = self.iters_per_segment[seg_idx]
 
+                # Default-arg trick captures the *current* values of `eta` /
+                # `k`. The lambdas are called immediately by
+                # `_apply_matrix_function`, so closing over the loop variables
+                # would also be safe, but pylint flags `cell-var-from-loop`.
                 preconditioned_grads = self._apply_matrix_function(
                     running_grads,
                     segment,
-                    lambda eig: self._r_factor(eig, eta, k),
+                    lambda eig, _eta=eta, _k=k: self._r_factor(eig, _eta, _k),
                 )
                 # Flatten for matmul against per-sample train gradients.
                 preconditioned_flat: Dict[str, torch.Tensor] = {}
@@ -511,7 +519,7 @@ class SourceComputer(AbstractComputer):
                     running_grads = self._apply_matrix_function(
                         running_grads,
                         segment,
-                        lambda eig: self._s_factor(eig, eta, k),
+                        lambda eig, _eta=eta, _k=k: self._s_factor(eig, _eta, _k),
                     )
 
             num_processed_test += test_batch_size
@@ -566,8 +574,11 @@ class SourceComputer(AbstractComputer):
                         )
                         score_table[
                             num_processed_test : num_processed_test + test_batch_size,
-                            num_processed_train : num_processed_train + train_batch_size,
-                        ].addmm_(preconditioned_flat[name], train_grads.t(), alpha=weight)
+                            num_processed_train : num_processed_train
+                            + train_batch_size,
+                        ].addmm_(
+                            preconditioned_flat[name], train_grads.t(), alpha=weight
+                        )
                         del train_grads
                 num_processed_train += train_batch_size
                 del train_grads_dict

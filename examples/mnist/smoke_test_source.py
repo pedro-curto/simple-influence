@@ -30,9 +30,9 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # `(NUM_TRAIN_SUBSET x NUM_TRAIN_SUBSET)` score table.
 EPOCHS = 4
 TRAIN_BATCH_SIZE = 128
-NUM_TRAIN_SUBSET = 4096      # enough for 32 batches/epoch -> 128 training iterations
+NUM_TRAIN_SUBSET = 4096  # enough for 32 batches/epoch -> 128 training iterations
 NUM_EVAL_TRAIN_SUBSET = 256  # subset used as both "training data" for EK-FAC and the
-                             # train side of the score table
+# train side of the score table
 NUM_VALID = 8
 LR = 0.03
 MOMENTUM = 0.9
@@ -49,7 +49,9 @@ def train_and_save(loader: torch.utils.data.DataLoader) -> None:
     """
     set_seed(0)
     model = construct_mlp().to(DEVICE)
-    optimizer = SGD(model.parameters(), lr=LR, momentum=MOMENTUM, weight_decay=WEIGHT_DECAY)
+    optimizer = SGD(
+        model.parameters(), lr=LR, momentum=MOMENTUM, weight_decay=WEIGHT_DECAY
+    )
     loss_fn = CrossEntropyLoss()
 
     os.makedirs(CKPT_DIR, exist_ok=True)
@@ -107,7 +109,9 @@ def main() -> None:
     task = ClassificationTask(device=DEVICE)
     # Reload the final checkpoint (`train_and_save` returns the in-place
     # trained model, which is already at theta_s, but be explicit).
-    model.load_state_dict(torch.load(f"{CKPT_DIR}/mnist_epoch_{EPOCHS}.pt", map_location=DEVICE))
+    model.load_state_dict(
+        torch.load(f"{CKPT_DIR}/mnist_epoch_{EPOCHS}.pt", map_location=DEVICE)
+    )
     model.to(DEVICE).eval()
 
     ifc = InfluenceFunctionComputer(model=model, task=task, n_epoch=1)
@@ -115,8 +119,10 @@ def main() -> None:
     if_scores = ifc.compute_scores_with_loader(
         test_loader=valid_loader, train_loader=eval_train_loader
     )
-    print(f"  IF scores: shape={tuple(if_scores.shape)}, "
-          f"mean={if_scores.mean():.4f}, std={if_scores.std():.4f}")
+    print(
+        f"  IF scores: shape={tuple(if_scores.shape)}, "
+        f"mean={if_scores.mean():.4f}, std={if_scores.std():.4f}"
+    )
 
     # --- SOURCE ---
     print("Computing SOURCE scores...")
@@ -155,8 +161,10 @@ def main() -> None:
     source_scores = source.compute_scores_with_loader(
         test_loader=valid_loader, train_loader=eval_train_loader
     )
-    print(f"  SOURCE scores: shape={tuple(source_scores.shape)}, "
-          f"mean={source_scores.mean():.4f}, std={source_scores.std():.4f}")
+    print(
+        f"  SOURCE scores: shape={tuple(source_scores.shape)}, "
+        f"mean={source_scores.mean():.4f}, std={source_scores.std():.4f}"
+    )
     assert source_scores.shape == if_scores.shape
     assert torch.isfinite(source_scores).all()
 
@@ -169,8 +177,10 @@ def main() -> None:
     for q in range(source_scores.shape[0]):
         rho, _ = spearmanr(source_scores[q].cpu().numpy(), if_scores[q].cpu().numpy())
         rhos.append(rho)
-    print(f"  per-query Spearman(SOURCE, IF): mean={sum(rhos) / len(rhos):.3f} "
-          f"min={min(rhos):.3f} max={max(rhos):.3f}")
+    print(
+        f"  per-query Spearman(SOURCE, IF): mean={sum(rhos) / len(rhos):.3f} "
+        f"min={min(rhos):.3f} max={max(rhos):.3f}"
+    )
 
     # Stronger sanity check: top-k positively-influential training points for
     # a correctly-classified query should mostly share the query's label.
@@ -188,6 +198,15 @@ def main() -> None:
             same_label += int((train_labels[top_idx] == valid_labels[q]).sum().item())
         rate = same_label / (scores.shape[0] * top_k)
         print(f"  {name}: top-{top_k} same-label rate = {rate:.2%}")
+
+    # Save scores in the same layout as `compute_influences.py` so the
+    # visualize script (and any downstream tooling) can pick them up without
+    # change.
+    results_dir = "files/results/0"
+    os.makedirs(results_dir, exist_ok=True)
+    torch.save(if_scores, f"{results_dir}/mnist_if.pt")
+    torch.save(source_scores, f"{results_dir}/mnist_source.pt")
+    print(f"Saved scores to {results_dir}/mnist_{{if,source}}.pt")
 
     print("Done.")
 
