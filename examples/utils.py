@@ -1,3 +1,5 @@
+"""Shared helpers used by every example pipeline."""
+
 import gc
 import os
 import random
@@ -8,7 +10,12 @@ import torch
 
 
 def set_seed(seed: int) -> None:
-    """Set random seed for reproducibility."""
+    """Set the global random seed for ``random``, NumPy, and PyTorch.
+
+    Args:
+        seed (int):
+            Random seed.
+    """
     seed = int(seed)
     random.seed(seed)
     np.random.seed(seed)
@@ -17,13 +24,16 @@ def set_seed(seed: int) -> None:
 
 
 def reset_seed() -> None:
-    """Reset the seed to have randomized experiments."""
+    """Reset the seed to a fresh value drawn from ``os.urandom``."""
     rng_seed = struct.unpack("I", os.urandom(4))[0]
     set_seed(rng_seed)
 
 
 def clear_gpu_cache() -> None:
-    """Perform garbage collection and empty GPU cache reserved by Pytorch."""
+    """Free GPU memory: run gc, empty the PyTorch CUDA cache, reset peak stats.
+
+    No-op on CPU-only setups.
+    """
     if torch.cuda.is_available():
         gc.collect()
         torch.cuda.empty_cache()

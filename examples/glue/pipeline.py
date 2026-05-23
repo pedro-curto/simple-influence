@@ -1,3 +1,9 @@
+"""Pipeline for the GLUE (BERT) text-classification example.
+
+Defines the BERT wrapper and the HuggingFace-Datasets-backed loaders for
+the GLUE benchmark sub-tasks supported by this example (``qnli`` / ``sst2``).
+"""
+
 from typing import List, Optional, Tuple
 
 import torch
@@ -97,7 +103,7 @@ def get_dataloader(
     data_name: str,
     batch_size: int = 32,
     split: str = "train",
-    indices: List[int] = None,
+    indices: Optional[List[int]] = None,
     do_not_pad: bool = False,
 ) -> torch.utils.data.DataLoader:
     assert data_name in ["qnli", "sst2"]

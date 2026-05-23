@@ -1,3 +1,10 @@
+"""Abstract base class shared by every attribution computer.
+
+Provides the small bit of plumbing that all computers in this package need:
+holding references to a model and its task, a configured logger, and helpers
+for computing per-sample loss / measurement gradients via `torch.func`.
+"""
+
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict
@@ -9,18 +16,23 @@ from src.abstract_task import AbstractTask, validate_task
 
 
 class AbstractComputer(ABC):
-    """An abstract base class for Computers."""
+    """Abstract base class for attribution computers.
 
-    # Specifies the dtype for storing TDA scores.
+    Class attributes control numerical precision throughout the pipeline. They
+    are conservative defaults; individual subclasses are free to override.
+
+    Attributes:
+        score_dtype (torch.dtype): dtype used to store final attribution scores.
+        grads_dtype (torch.dtype): dtype used to store per-sample gradients.
+        stats_dtype (torch.dtype): dtype used to store EK-FAC covariance
+            statistics (applies only to influence-function-style computers).
+        eig_dtype (torch.dtype): dtype used for eigendecomposition (applies
+            only to influence-function-style computers).
+    """
+
     score_dtype: torch.dtype = torch.float32
-
-    # Specifies the dtype for storing gradients.
     grads_dtype: torch.dtype = torch.float32
-
-    # Specifies the dtype for storing statistics (only applies to influence functions).
     stats_dtype: torch.dtype = torch.float32
-
-    # Specifies the dtype for performing eigendecompositon (only applies to influence functions).
     eig_dtype: torch.dtype = torch.float64
 
     @abstractmethod
@@ -31,24 +43,26 @@ class AbstractComputer(ABC):
         logger_name: str,
         logging_level: int = logging.INFO,
     ) -> None:
-        """Initializes the class AbstractComputer.
+        """Initialize the computer.
 
         Args:
             model (nn.Module):
-                PyTorch model for which scores are computed.
+                Model for which attribution scores will be computed.
             task (AbstractTask):
-                Specifies the task for the pipeline. For details, see `AbstractTask` in
-                `src/abstract_task.py`.
+                Task adapter for the model. See `src/abstract_task.py`.
             logger_name (str):
-                Name of the logger.
+                Name passed to `logging.getLogger`; typically the subclass
+                name.
             logging_level (int, optional):
-                The logging level. Defaults to `logging.INFO`.
+                Logger level. Defaults to `logging.INFO`.
         """
         self.model = model
         self.task = task
 
-        # Setup logging configurations.
-        logging.basicConfig()
+        # Use a named logger and let the application configure
+        # handlers/formatters. Avoid calling `logging.basicConfig()` here,
+        # since it mutates global logging state and can collide with the
+        # user's own configuration.
         self.logger = logging.getLogger(logger_name)
         self.logger.setLevel(logging_level)
 
@@ -60,15 +74,21 @@ class AbstractComputer(ABC):
         buffers: Dict[str, torch.Tensor],
         batch: Any,
     ) -> torch.Tensor:
-        """Computes the cumulative training loss for a given batch using specified model parameters and buffers.
+        """Compute the summed training loss for a batch under the given params.
+
+        Used as the inner function of `torch.func.grad` to obtain per-sample
+        training-loss gradients.
 
         Args:
             params (dict):
-                Model parameters to be used for computation.
+                Parameter dict, typically obtained from `model.named_parameters()`.
             buffers (dict):
-                Model buffers to be used for computation.
+                Buffer dict, typically obtained from `model.named_buffers()`.
             batch (Any):
-                The batch of data on which the loss will be computed.
+                A single batch.
+
+        Returns:
+            torch.Tensor: scalar summed loss.
         """
         return self.task.get_train_loss(
             model=self.model,
@@ -79,7 +99,11 @@ class AbstractComputer(ABC):
         )
 
     def _compute_train_loss_grad(self) -> Callable:
-        """Returns the function that computes gradients of loss w.r.t. parameters."""
+        """Return `torch.func.grad` of `_compute_train_loss` w.r.t. params.
+
+        Returns:
+            Callable: a function `(params, buffers, batch) -> param-grads-dict`.
+        """
         return torch.func.grad(self._compute_train_loss, argnums=0, has_aux=False)
 
     def _compute_measurement(
@@ -88,15 +112,21 @@ class AbstractComputer(ABC):
         buffers: Dict[str, torch.Tensor],
         batch: Any,
     ) -> torch.Tensor:
-        """Computes the cumulative measurement for a given batch using specified model parameters and buffers.
+        """Compute the summed measurement for a batch under the given params.
+
+        Used as the inner function of `torch.func.grad` for query-side
+        gradients.
 
         Args:
             params (dict):
-                Model parameters to be used for computation.
+                Parameter dict.
             buffers (dict):
-                Model buffers to be used for computation.
+                Buffer dict.
             batch (Any):
-                The batch of data on which the loss will be computed.
+                A single batch (typically the query / test batch).
+
+        Returns:
+            torch.Tensor: scalar summed measurement.
         """
         return self.task.get_measurement(
             model=self.model,
@@ -106,5 +136,9 @@ class AbstractComputer(ABC):
         )
 
     def _compute_measurement_grad(self) -> Callable:
-        """Returns the function that computes gradients of measurement w.r.t. parameters."""
+        """Return `torch.func.grad` of `_compute_measurement` w.r.t. params.
+
+        Returns:
+            Callable: a function `(params, buffers, batch) -> param-grads-dict`.
+        """
         return torch.func.grad(self._compute_measurement, argnums=0, has_aux=False)

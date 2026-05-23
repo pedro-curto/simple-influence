@@ -1,3 +1,10 @@
+"""Task adapter for WikiText-2 language modeling with GPT-2.
+
+Standard next-token cross-entropy loss against an auto-regressive shift of
+the input tokens, with the influence-modules list covering every block's
+attention and MLP projections.
+"""
+
 from typing import Any, Dict, List, Optional, Union
 
 import torch
@@ -67,7 +74,7 @@ class LanguageModelTask(AbstractTask):
         elif reduction == "mean":
             return summed_loss / batch_size
         else:
-            raise NotImplementedError("Not supported reduction provided.")
+            raise NotImplementedError(f"Reduction '{reduction}' is not supported.")
 
     def get_measurement(
         self,

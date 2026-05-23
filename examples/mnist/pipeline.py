@@ -1,3 +1,10 @@
+"""Pipeline for the MNIST / FashionMNIST example.
+
+Defines the classification MLP, per-dataset hyperparameters, and the
+torchvision-based data loaders used by both the training script and the
+attribution scripts.
+"""
+
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -6,6 +13,18 @@ import torchvision
 
 
 def construct_mlp(num_inputs: int = 784, num_classes: int = 10) -> nn.Module:
+    """Build the 3-hidden-layer classification MLP used by every MNIST task.
+
+    Args:
+        num_inputs (int, optional):
+            Flattened input dimensionality. Defaults to ``784`` (28*28).
+        num_classes (int, optional):
+            Number of output classes. Defaults to ``10``.
+
+    Returns:
+        nn.Module: ``Sequential`` model with a ``Flatten`` followed by 4
+        Linear layers and ReLU activations.
+    """
     model = torch.nn.Sequential(
         nn.Flatten(),
         nn.Linear(num_inputs, 512, bias=True),
@@ -82,7 +101,7 @@ def get_loaders(
 def get_mnist_dataloader(
     batch_size: int = 128,
     split: str = "train",
-    indices: List[int] = None,
+    indices: Optional[List[int]] = None,
 ) -> torch.utils.data.DataLoader:
     assert split in ["train", "eval_train", "valid"]
 
@@ -116,7 +135,7 @@ def get_mnist_dataloader(
 def get_fmnist_dataloader(
     batch_size: int = 128,
     split: str = "train",
-    indices: List[int] = None,
+    indices: Optional[List[int]] = None,
 ) -> torch.utils.data.DataLoader:
     assert split in ["train", "eval_train", "valid"]
 

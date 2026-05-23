@@ -1,3 +1,14 @@
+"""Compute training-data-attribution scores for the UCI-regression example.
+
+After training with ``train.py``, this script loads the final checkpoint
+and computes representation-similarity, gradient-similarity, TracIn / GAS,
+and EK-FAC influence-function scores, saving each result under
+``files/results/{model_id}/``.
+
+Run from the project root:
+    python -m examples.regression.compute_influences
+"""
+
 import os
 from typing import List
 

@@ -1,3 +1,12 @@
+"""Training entry point for the WikiText-2 (GPT-2) example.
+
+Fine-tunes GPT-2 on WikiText-2 and saves a checkpoint per epoch under
+``files/checkpoints/{model_id}/``.
+
+Run from the project root:
+    python -m examples.wiki.train
+"""
+
 import math
 import os
 import time
