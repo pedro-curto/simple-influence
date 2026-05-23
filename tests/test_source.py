@@ -104,7 +104,9 @@ def test_source_single_segment_matches_damped_if(test_name: str, tmp_path) -> No
         rho, _ = spearmanr(source_scores[q].cpu().numpy(), if_scores[q].cpu().numpy())
         rhos.append(rho)
     mean_rho = float(sum(rhos) / len(rhos))
-    assert mean_rho > 0.85, f"Mean Spearman correlation too low: {mean_rho} (per-query: {rhos})"
+    assert (
+        mean_rho > 0.85
+    ), f"Mean Spearman correlation too low: {mean_rho} (per-query: {rhos})"
 
 
 @pytest.mark.parametrize("test_name", ["mlp"])
