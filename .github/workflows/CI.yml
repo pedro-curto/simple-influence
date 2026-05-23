@@ -7,32 +7,42 @@ jobs:
     name: Pre-commit checks
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-python@v4
-      with:
-        python-version: 3.9
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install ".[pytorch_cpu, dev]"
-    - uses: pre-commit/action@v3.0.0
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[pytorch_cpu, dev]"
+      - uses: pre-commit/action@v3.0.0
+
   pytest:
+    name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    needs: pre-commit # Don't run tests if pre-commit fails
+    needs: pre-commit  # Don't run tests if pre-commit fails.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]
     steps:
-    - uses: actions/checkout@v3
-    - name: Set up Python 3.9
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.9
-        cache: 'pip' # Cache pip dependencies\.
-        cache-dependency-path: '**/setup.py'
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install ".[pytorch_cpu, dev]"
-    - name: Run pytest tests
-      run: |
-        pytest -vx tests/test_utils.py
-        pytest -vx tests/test_baselines.py
-        pytest -vx tests/test_ekfac.py
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: setup.cfg
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[pytorch_cpu, dev]"
+      # Skip the `smoke`-marked tests (they download BERT / GPT-2 and run for
+      # minutes), and deselect `test_trak` because the upstream `traker`
+      # `BasicProjector` requires CUDA + `fast_jl` to work end-to-end - we
+      # don't install those in CI.
+      - name: Run tests
+        run: |
+          pytest -v -m "not smoke" \
+            --deselect "tests/test_baselines.py::test_trak" \
+            tests/
