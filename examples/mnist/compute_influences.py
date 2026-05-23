@@ -133,7 +133,7 @@ def _build_source_segments(
     data_name: str,
     model_id: int,
     num_segments: int,
-    epochs_per_segment: List[int],
+    epochs_per_segment: List[List[int]],
 ) -> Tuple[List[List[str]], List[int], List[float]]:
     """Build per-segment checkpoint / iteration / learning-rate triples.
 

@@ -795,11 +795,12 @@ class InfluenceFunctionComputer(AbstractComputer):
 
         num_processed_test = 0
         for test_batch in test_loader:
-            self.logger.info(
-                f"Processed {num_processed_test} test data points "
-                f"(out of {len(test_loader.dataset)})."
-            )
             test_batch_size = self.task.get_batch_size(test_batch)
+            self.logger.info(
+                f"Processing test batch [{num_processed_test}, "
+                f"{num_processed_test + test_batch_size}) of "
+                f"{len(test_loader.dataset)}."
+            )
             precond_test_grads_dict = self._get_precond_grads_dict(
                 batch=test_batch,
                 use_measurement=True,

@@ -71,12 +71,12 @@ def make_grads_dict_to_matrix(
     """Reshape per-parameter gradients into a single (B, ...) matrix per module.
 
     The output layout depends on the module:
-      - `Linear` / `Embedding`: `(B, out, in [+1 if bias])` — bias is
+      - `Linear` / `Embedding`: `(B, out, in [+1 if bias])` - bias is
         concatenated as an extra "in" column, matching the augmented-input
         trick used by `extract_activations`.
-      - `Conv2d`: `(B, out, in * kH * kW [+1 if bias])` — weight is flattened
+      - `Conv2d`: `(B, out, in * kH * kW [+1 if bias])` - weight is flattened
         across kernel positions, bias concatenated as an extra column.
-      - `LayerNorm` / `BatchNorm2d`: `(B, 2 * num_features)` — weight and bias
+      - `LayerNorm` / `BatchNorm2d`: `(B, 2 * num_features)` - weight and bias
         concatenated along the trailing axis.
 
     Args:
