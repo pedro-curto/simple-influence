@@ -189,6 +189,15 @@ def main() -> None:
         rate = same_label / (scores.shape[0] * top_k)
         print(f"  {name}: top-{top_k} same-label rate = {rate:.2%}")
 
+    # Save scores in the same layout as `compute_influences.py` so the
+    # visualize script (and any downstream tooling) can pick them up without
+    # change.
+    results_dir = f"files/results/0"
+    os.makedirs(results_dir, exist_ok=True)
+    torch.save(if_scores, f"{results_dir}/mnist_if.pt")
+    torch.save(source_scores, f"{results_dir}/mnist_source.pt")
+    print(f"Saved scores to {results_dir}/mnist_{{if,source}}.pt")
+
     print("Done.")
 
 
