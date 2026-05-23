@@ -1,3 +1,9 @@
+"""Task adapter for UCI regression.
+
+Implements the regression-specific loss / measurement / batch-size /
+influence-modules contract that every TDA computer in this repo consumes.
+"""
+
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
@@ -10,6 +16,8 @@ BATCH_DTYPE = Tuple[torch.Tensor, torch.Tensor]
 
 
 class RegressionModelOutput:
+    """TRAK adapter for the regression task (`get_output` + `get_out_to_loss_grad`)."""
+
     @staticmethod
     def get_output(
         model: torch.nn.Module,

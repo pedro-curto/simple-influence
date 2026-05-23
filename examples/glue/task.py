@@ -1,3 +1,11 @@
+"""Task adapter for GLUE text classification (BERT).
+
+Cross-entropy loss / measurement against ``input_ids`` / ``token_type_ids``
+/ ``attention_mask`` / ``labels``. The influence-modules list covers
+attention, intermediate, output, pooler, and classifier sub-layers of every
+BERT block.
+"""
+
 from typing import Any, Dict, List, Optional, Union
 
 import torch

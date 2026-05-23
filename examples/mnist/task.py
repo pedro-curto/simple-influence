@@ -1,3 +1,10 @@
+"""Task adapter for MNIST / FashionMNIST image classification.
+
+Implements the classification contract used by every TDA computer in this
+repo: cross-entropy training loss, margin-based TRAK adapter, and the
+module list / representation module suitable for the example MLP.
+"""
+
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -10,6 +17,8 @@ BATCH_DTYPE = Tuple[torch.Tensor, torch.Tensor]
 
 
 class ImageClassificationModelOutput:
+    """TRAK adapter for classification (margin output + softmax loss gradient)."""
+
     softmax: nn.Module = torch.nn.Softmax(-1)
     loss_temperature: float = 1.0
 

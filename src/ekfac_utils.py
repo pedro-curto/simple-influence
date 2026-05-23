@@ -1,3 +1,12 @@
+"""Helpers shared by the EK-FAC machinery.
+
+These functions handle the layout / reshaping work that the influence-function
+and SOURCE computers need but that doesn't belong on any specific computer
+class: extracting activation patches for convolution, flattening per-sample
+gradients to module-major layout, and packaging the bias gradient into the
+weight gradient via the standard "augmented input" trick.
+"""
+
 from typing import Dict, Optional, Tuple
 
 import torch
@@ -5,8 +14,7 @@ import torch.nn as nn
 
 
 class InvalidModuleError(Exception):
-    # Raised when the provided module is invalid.
-    pass
+    """Raised when an unsupported module type is passed to an EK-FAC helper."""
 
 
 def extract_patches(
@@ -15,27 +23,35 @@ def extract_patches(
     stride: Tuple[int, int],
     padding: Tuple[int, int],
 ) -> torch.Tensor:
-    """Extract patches for the KFC approximation.
+    """Extract sliding patches from a Conv2d input for the K-FAC approximation.
 
-    This method is based on the technique described in https://arxiv.org/pdf/1602.01407.pdf.
+    This is the standard "unfolding" step used by K-FAC for convolutional
+    layers (see Grosse and Martens, 2016, https://arxiv.org/pdf/1602.01407.pdf):
+    each output spatial location's input patch becomes a row, so the resulting
+    tensor can be treated like a Linear layer's activations.
 
     Args:
         inputs (torch.Tensor):
-            Activations before the convolutional layer.
+            `(N, C_in, H, W)` activations entering the convolution.
         kernel_size (tuple):
-            Dimensions of the convolutional layer's kernel.
+            `(kH, kW)` kernel size of the conv layer.
         stride (tuple):
-            Stride applied in the convolutional layer.
+            `(sH, sW)` stride of the conv layer.
         padding (tuple):
-            Padding dimensions applied in the convolutional layer.
+            `(pH, pW)` padding of the conv layer.
+
+    Returns:
+        torch.Tensor: `(N, H_out, W_out, C_in * kH * kW)` patches.
     """
     if padding[0] + padding[1] > 0:
         inputs = torch.nn.functional.pad(
             inputs,
             (padding[1], padding[1], padding[0], padding[0]),
-        ).data
+        ).detach()
     inputs = inputs.unfold(2, kernel_size[0], stride[0])
     inputs = inputs.unfold(3, kernel_size[1], stride[1])
+    # Move spatial dims so the patch elements end up as the trailing flattened
+    # axis (each row is one output location's input patch).
     inputs = inputs.transpose_(1, 2).transpose_(2, 3).contiguous()
     inputs = inputs.view(
         inputs.size(0),
@@ -52,22 +68,35 @@ def make_grads_dict_to_matrix(
     grads_dict: Dict[str, torch.Tensor],
     remove_grads: bool = True,
 ) -> torch.Tensor:
-    """Extracts and reshapes the homogeneous matrix of gradients for the specified `module`
-    from the provided dictionary of batched gradients.
+    """Reshape per-parameter gradients into a single (B, ...) matrix per module.
 
-    The provided module must be an instance of one of the following: `Linear`, `Conv`, `Embedding`,
-     `LayerNorm`, or `BatchNorm2d`.
+    The output layout depends on the module:
+      - `Linear` / `Embedding`: `(B, out, in [+1 if bias])` — bias is
+        concatenated as an extra "in" column, matching the augmented-input
+        trick used by `extract_activations`.
+      - `Conv2d`: `(B, out, in * kH * kW [+1 if bias])` — weight is flattened
+        across kernel positions, bias concatenated as an extra column.
+      - `LayerNorm` / `BatchNorm2d`: `(B, 2 * num_features)` — weight and bias
+        concatenated along the trailing axis.
 
     Args:
         module (nn.Module):
-            The module for which the matrix will be reshaped.
+            Module the gradients belong to. Must be one of `Linear`, `Conv2d`,
+            `Embedding`, `LayerNorm`, or `BatchNorm2d`.
         module_name (str):
-            The name of the module, specific to the architecture it belongs to.
+            Qualified module name (matching keys in `grads_dict`).
         grads_dict (dict):
-            A dictionary that maps parameter names to their corresponding gradients.
-        remove_grads (bool):
-            If set to True, remove the reference to the original gradients. Defaults to True to
-            reduce memory overheads.
+            Dict mapping parameter names (e.g. `"layer1.weight"`) to per-sample
+            gradient tensors.
+        remove_grads (bool, optional):
+            If `True` (default), delete the consumed keys from `grads_dict` to
+            free memory. **Mutates the input dict.**
+
+    Returns:
+        torch.Tensor: the reshaped per-sample gradient matrix.
+
+    Raises:
+        InvalidModuleError: if `module` is not a supported type.
     """
     if isinstance(module, nn.Linear) or isinstance(module, nn.Embedding):
         grads_mat = grads_dict[module_name + ".weight"]
@@ -91,7 +120,9 @@ def make_grads_dict_to_matrix(
             if remove_grads:
                 del grads_dict[module_name + ".bias"]
     elif isinstance(module, nn.BatchNorm2d) or isinstance(module, nn.LayerNorm):
-        # Concatenate weights and bias.
+        # For LayerNorm / BatchNorm we keep weight and bias as one flat block,
+        # since the "full Fisher" branch downstream operates on the
+        # concatenated vector directly.
         grads_mat = torch.cat(
             (grads_dict[module_name + ".weight"], grads_dict[module_name + ".bias"]), -1
         )
@@ -107,15 +138,30 @@ def extract_activations(
     module: nn.Module,
     activations_mask: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """Extract and reshape activations into valid shapes for covariance computations.
+    """Reshape activations entering a module for covariance accumulation.
+
+    For modules with a bias, an extra column of ones is appended to the
+    activations so the same outer product `acts.T @ acts` covers both the
+    weight and the bias rows of the K-FAC factor (the standard "augmented
+    input" trick).
 
     Args:
         activations (torch.Tensor):
-            Raw pre-activations supplied to the module.
+            Raw pre-activations as captured by a forward hook.
         module (nn.Module):
-            The module where the activations are applied.
+            The module the activations feed into (`Linear` or `Conv2d`).
         activations_mask (torch.Tensor, optional):
-             If padding with dummy inputs is applied to the batch, provide the same mask.
+            Multiplicative mask applied to the activations (and the appended
+            ones column for the bias) before reshaping. Use this to zero out
+            padded positions in Transformer batches so they don't contribute
+            to the covariance.
+
+    Returns:
+        torch.Tensor: a 2-D `(num_locations, in_dim [+1])` activation matrix
+        ready for `acts.T @ acts`.
+
+    Raises:
+        InvalidModuleError: if `module` is not Linear or Conv2d.
     """
     if isinstance(module, nn.Linear):
         if (
@@ -154,13 +200,23 @@ def extract_activations(
 
 
 def extract_gradients(gradients: torch.Tensor, module: nn.Module) -> torch.Tensor:
-    """Extract and reshape gradients into valid shapes for covariance computations.
+    """Reshape pseudo-gradients on a module's output for covariance accumulation.
+
+    The output is laid out so that `grads.T @ grads` yields the pseudo-gradient
+    covariance `S` from K-FAC (Martens & Grosse 2015).
 
     Args:
         gradients (torch.Tensor):
-            Raw gradients on the output to the module.
+            Pseudo-gradients on the module's pre-activations, as captured by a
+            backward hook.
         module (nn.Module):
-            The module where the gradients are computed.
+            The module the gradients belong to (`Linear` or `Conv2d`).
+
+    Returns:
+        torch.Tensor: a 2-D `(num_locations, out_dim)` gradient matrix.
+
+    Raises:
+        InvalidModuleError: if `module` is not Linear or Conv2d.
     """
     if isinstance(module, nn.Linear):
         del module

@@ -1,3 +1,9 @@
+"""Pipeline for the UCI-regression example.
+
+Defines the regression MLP, hyperparameters (lr / weight decay), and the
+data loading / standardization for the UCI Concrete and Parkinsons datasets.
+"""
+
 import os
 from typing import List, Optional, Tuple
 
@@ -8,6 +14,20 @@ from sklearn.preprocessing import StandardScaler
 
 
 def construct_regression_mlp(data_name: str) -> nn.Module:
+    """Build the 3-hidden-layer MLP used by every regression task in this example.
+
+    The ``data_name`` argument is accepted for API symmetry with the other
+    pipelines but is currently unused (the same architecture is applied to
+    every dataset).
+
+    Args:
+        data_name (str):
+            UCI dataset name (unused).
+
+    Returns:
+        nn.Module: a ``Sequential`` MLP with 4 Linear layers and ReLU
+        activations.
+    """
     del data_name
     num_inputs = 8
     model = torch.nn.Sequential(
@@ -23,6 +43,18 @@ def construct_regression_mlp(data_name: str) -> nn.Module:
 
 
 def get_hyperparameters(data_name: str) -> dict:
+    """Return per-dataset training hyperparameters.
+
+    Args:
+        data_name (str):
+            ``"concrete"`` or ``"parkinsons"``.
+
+    Returns:
+        dict: ``{"lr": ..., "wd": ...}``.
+
+    Raises:
+        NotImplementedError: if ``data_name`` is unknown.
+    """
     if data_name == "concrete":
         lr = 0.03
         wd = 1e-05
@@ -45,6 +77,25 @@ def get_loaders(
     torch.utils.data.DataLoader,
     torch.utils.data.DataLoader,
 ]:
+    """Build ``(train, eval_train, valid)`` data loaders for a UCI dataset.
+
+    Args:
+        data_name (str):
+            ``"concrete"`` or ``"parkinsons"``.
+        eval_batch_size (int, optional):
+            Batch size for the evaluation (``eval_train`` and ``valid``)
+            loaders. Defaults to ``4096``.
+        train_indices (List[int], optional):
+            Restrict the training loader to these indices (after splitting).
+        valid_indices (List[int], optional):
+            Restrict the validation loader to these indices.
+        data_path (str, optional):
+            Directory containing the ``<data_name>.data`` file.
+
+    Returns:
+        Tuple of three ``DataLoader``s: training (shuffled, drop-last),
+        eval-training (in-order over the same data), and validation.
+    """
     assert data_name in ["concrete", "parkinsons"]
     train_batch_size = 32
 
@@ -88,9 +139,31 @@ def get_uci_dataloader(
     data_name: str,
     batch_size: int,
     split: str,
-    indices: List[int] = None,
+    indices: Optional[List[int]] = None,
     data_path: str = "data/",
 ) -> torch.utils.data.DataLoader:
+    """Load one UCI split and return a DataLoader.
+
+    Reads ``<data_path>/<data_name>.data``, deterministically shuffles the
+    rows (seed=0), splits 90 / 10 into train / valid, and standardizes both
+    inputs and targets (per the standard UCI regression protocol).
+
+    Args:
+        data_name (str):
+            UCI dataset name (one of ``"concrete"`` / ``"parkinsons"``).
+        batch_size (int):
+            Batch size for the returned loader.
+        split (str):
+            ``"train"`` (shuffled, drop-last), ``"eval_train"`` (in-order),
+            or ``"valid"``.
+        indices (List[int], optional):
+            Restrict to this index list before constructing the loader.
+        data_path (str, optional):
+            Directory holding the ``.data`` files.
+
+    Returns:
+        DataLoader: configured loader for the requested split.
+    """
     assert split in ["train", "eval_train", "valid"]
 
     # Load the dataset from the `.data` file.

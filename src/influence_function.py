@@ -1,3 +1,24 @@
+"""Influence functions with EK-FAC curvature approximation.
+
+Implementation of the EK-FAC-approximated influence function of Grosse et al.
+(2023, https://arxiv.org/pdf/2308.03296.pdf). Given a trained model, this
+computer attributes a query measurement `f(z_q, theta)` to each training point
+`z_m` by computing
+
+    tau(z_q, z_m) = grad f(z_q, theta)^T H^{-1} grad L(z_m, theta)
+
+where `H` is the (Gauss-Newton) Hessian and the inverse Hessian-vector product
+is approximated using EK-FAC. The implementation supports three module
+families:
+
+  * Kronecker (``Linear``, ``Conv2d``): full EK-FAC factorization.
+  * Full (``LayerNorm``, ``BatchNorm2d``): explicit dense Fisher inversion.
+  * Diagonal (``Embedding``): diagonal Fisher.
+
+Only these module types are picked up; other parameters in the model do not
+contribute to the attribution score.
+"""
+
 import time
 from typing import Any, Dict, Optional, Tuple
 
@@ -15,6 +36,29 @@ from src.ekfac_utils import (
 
 
 class InfluenceFunctionComputer(AbstractComputer):
+    """Compute influence-function scores via EK-FAC.
+
+    The class is used in three phases:
+
+      1. Construct the computer (registers forward / backward hooks on the
+         supported modules).
+      2. Call :meth:`build_curvature_blocks` once with a training data loader.
+         This populates the EK-FAC factors (covariances, eigenbasis, corrected
+         eigenvalues, full / diagonal Fisher) used for preconditioning.
+      3. Call :meth:`compute_scores_with_loader` (or
+         :meth:`compute_scores_with_batch`, or
+         :meth:`compute_self_scores_with_loader`) to obtain attribution scores.
+
+    Attributes:
+        damping (Optional[float]): module-wise damping term. If ``None``, the
+            module-wise damping is set to ``0.1 * mean(eigvals)`` (a common
+            heuristic) per module.
+        n_epoch (int): number of epochs over the data loader used while fitting
+            covariances and the corrected eigenvalues.
+        use_true_fisher (bool): whether to sample targets from the model output
+            (true Fisher) instead of using the actual labels (empirical Fisher).
+    """
+
     _supported_kronecker_modules = {"Linear", "Conv2d"}
     _supported_full_modules = {"LayerNorm", "BatchNorm2d"}
     _supported_diag_modules = {"Embedding"}
@@ -28,25 +72,25 @@ class InfluenceFunctionComputer(AbstractComputer):
         n_epoch: int = 1,
         use_true_fisher: bool = True,
     ) -> None:
-        """Initializes the `InfluenceFunctionComputer` class.
-
-        This class performs TDA using influence functions. More specifically, instead of using expensive
-        iterative computers such as LiSSA, the class uses EK-FAC approximation. The details can be
-        found in https://arxiv.org/pdf/2308.03296.pdf.
+        """Initialize the influence-function computer.
 
         Args:
             model (nn.Module):
-                PyTorch model for which influences are computed.
+                Model whose final parameters serve as ``theta`` for attribution.
             task (AbstractTask):
-                Specifies the task for the pipeline.
+                Task adapter describing the loss, measurement, and the module
+                set over which scores are computed.
             damping (float, optional):
-                A damping term. If not provided, the module-wise damping is set as
-                0.1 times the mean of the eigenvalues.
+                Module-wise damping ``lambda`` added to the EK-FAC eigenvalues
+                before inversion. If ``None`` (default), uses
+                ``0.1 * mean(eigvals)`` per module.
             n_epoch (int, optional):
-                Number of epochs to compute covariance and lambda statistics. Defaults to 1.
+                Number of passes over the loader for covariance / corrected-
+                eigenvalue estimation. Defaults to ``1``.
             use_true_fisher (bool, optional):
-                If set to True, targets are sampled from the outputs. If set to False, the
-                empirical Fisher is used, and the targets are set to the true targets. Default is True.
+                If ``True`` (default), sample targets from the model output
+                while fitting curvature (true Fisher); if ``False``, use the
+                labels (empirical Fisher).
         """
         super().__init__(model=model, task=task, logger_name=self.__class__.__name__)
 
@@ -57,37 +101,55 @@ class InfluenceFunctionComputer(AbstractComputer):
         self.n_epoch = n_epoch
         self.use_true_fisher = use_true_fisher
 
-        # List of attributes to navigate modules.
+        # Reverse map for hooks: hooks receive the module object, but we index
+        # all our caches by the qualified module name.
         self._module_to_name = {
             v: k for k, v in dict(self.model.named_modules()).items()
         }
-        self.modules = []
-        self.modules_name = []
-        # Modules, where influences are computed using EK-FAC (e.g., Linear, Conv2d).
-        self.kronecker_modules_name = []
-        # Modules, where influences are computed using the full Fisher (e.g., LayerNorm2d).
-        self.full_modules_name = []
-        # Modules, where influence are computied using the diagonal Fisher (e.g., Embedding).
-        self.diag_modules_name = []
 
-        # List of attributes to keep track EK-FAC computation.
-        self.activation_cov, self.pseudograd_cov = {}, {}
-        self.activation_cov_eigvecs, self.pseudograd_cov_eigvecs = {}, {}
-        self.activation_cov_eigvals, self.pseudograd_cov_eigvals = {}, {}
-        self.kronecker_eigvals, self.full_factors, self.diag_factors = {}, {}, {}
-        self.damping_factors = {}
-        self._activation_masks = None
+        # Ordered lists holding the modules participating in attribution and
+        # their qualified names. The three `_*_modules_name` sub-lists indicate
+        # which Fisher branch each module belongs to.
+        self.modules: list = []
+        self.modules_name: list = []
+        self.kronecker_modules_name: list = []
+        self.full_modules_name: list = []
+        self.diag_modules_name: list = []
 
-        # Flags to indicate which computation has already finished.
+        # Caches populated by `fit_covariances`, `fit_eigendecompositions`,
+        # `fit_additional_factors`.
+        self.activation_cov: Dict[str, torch.Tensor] = {}
+        self.pseudograd_cov: Dict[str, torch.Tensor] = {}
+        self.activation_cov_eigvecs: Dict[str, torch.Tensor] = {}
+        self.pseudograd_cov_eigvecs: Dict[str, torch.Tensor] = {}
+        self.activation_cov_eigvals: Dict[str, torch.Tensor] = {}
+        self.pseudograd_cov_eigvals: Dict[str, torch.Tensor] = {}
+        self.kronecker_eigvals: Dict[str, torch.Tensor] = {}
+        self.full_factors: Dict[str, torch.Tensor] = {}
+        self.diag_factors: Dict[str, torch.Tensor] = {}
+        self.damping_factors: Dict[str, torch.Tensor] = {}
+        self._activation_masks: Optional[torch.Tensor] = None
+
+        # Flags so each fitting step is idempotent.
         self._covariance_done = False
         self._eigendecompositon_done = False
         self._additional_factors_done = False
 
-        self._handles = []
+        self._handles: list = []
         self.initialize()
 
     def initialize(self) -> None:
-        """Initializes all hooks and save module mappings."""
+        """Register hooks and populate the module lists.
+
+        Walks the model once; for every module named in
+        ``task.influence_modules()`` whose class is supported, the module is
+        appended to :attr:`modules` and the appropriate Fisher-branch list.
+        Linear / Conv2d modules also get forward and backward hooks installed
+        for activation- and pseudo-gradient-covariance accumulation.
+
+        Raises:
+            AttributeError: if no supported module was found.
+        """
         for name, module in self.model.named_modules():
             classname = module.__class__.__name__
 
@@ -95,28 +157,24 @@ class InfluenceFunctionComputer(AbstractComputer):
                 self.logger.info(f"Found module {name}.")
 
                 if classname in self._supported_kronecker_modules:
-                    # Register all modules.
                     self.modules.append(module)
                     self.modules_name.append(name)
                     self.kronecker_modules_name.append(name)
 
-                    # Register forward hooks.
                     handle = module.register_forward_pre_hook(self._forward_hook)
                     self._handles.append(handle)
-
-                    # Register backward hooks.
                     handle = module.register_full_backward_hook(self._backward_hook)
                     self._handles.append(handle)
 
                 if classname in self._supported_full_modules:
-                    # This is only supported for LayerNorm & BatchNorm parameters (with affine set to True).
+                    # `affine=False` LayerNorm/BatchNorm has no weight / bias
+                    # to attribute against; skip silently.
                     if module.weight is not None:
                         self.modules.append(module)
                         self.modules_name.append(name)
                         self.full_modules_name.append(name)
 
                 if classname in self._supported_diag_modules:
-                    # This is supported for embedding parameters.
                     self.modules.append(module)
                     self.modules_name.append(name)
                     self.diag_modules_name.append(name)
@@ -126,14 +184,27 @@ class InfluenceFunctionComputer(AbstractComputer):
             self.logger.error(error_msg)
             raise AttributeError(error_msg)
 
+    # ------------------------------------------------------------------ hooks
+
     def _forward_hook(self, module: nn.Module, inputs: Tuple[torch.Tensor]) -> None:
-        """Computes the pre-activation covariance matrices."""
+        """Forward pre-hook: accumulate the per-module activation covariance.
+
+        Args:
+            module (nn.Module):
+                Module whose forward pass we are intercepting.
+            inputs (tuple):
+                Positional inputs to the module (expected to be a 1-tuple).
+        """
         assert len(inputs) == 1
 
         with torch.no_grad():
             module_name = self._module_to_name[module]
+            # `.detach().clone()` defensively copies out of the autograd graph:
+            # the hook's input shares storage with tensors that may be mutated
+            # later in the backward pass, which would silently corrupt the
+            # accumulated covariance.
             acts = extract_activations(
-                inputs[0].to(dtype=self.stats_dtype),
+                inputs[0].detach().clone().to(dtype=self.stats_dtype),
                 module,
                 self._activation_masks,
             ).to(dtype=self.stats_dtype)
@@ -150,14 +221,26 @@ class InfluenceFunctionComputer(AbstractComputer):
         grad_inputs: Tuple[torch.Tensor],
         grad_outputs: Tuple[torch.Tensor],
     ) -> None:
-        """Computes the pseudo-gradient covariance matrices."""
+        """Full backward hook: accumulate the per-module pseudo-gradient covariance.
+
+        Args:
+            module (nn.Module):
+                Module whose backward pass we are intercepting.
+            grad_inputs (tuple):
+                Unused (PyTorch passes ``grad_input`` here for full backward
+                hooks, but we only need ``grad_output``).
+            grad_outputs (tuple):
+                Gradient of the loss w.r.t. each output (expected to be a
+                1-tuple).
+        """
         del grad_inputs
         assert len(grad_outputs) == 1
 
         with torch.no_grad():
             module_name = self._module_to_name[module]
+            # Defensive copy: same reason as in `_forward_hook`.
             pseudograds = extract_gradients(
-                grad_outputs[0].to(dtype=self.stats_dtype), module
+                grad_outputs[0].detach().clone().to(dtype=self.stats_dtype), module
             ).to(dtype=self.stats_dtype)
             if module_name not in self.pseudograd_cov:
                 last_dim = pseudograds.shape[-1]
@@ -171,7 +254,16 @@ class InfluenceFunctionComputer(AbstractComputer):
     def _perform_forward_and_backward_pass(
         self, batch: Any, sample: bool = False, reduction: str = "sum"
     ) -> None:
-        """Perform the forward and backward pass with the given `batch`."""
+        """Run a forward + backward pass to drive the EK-FAC hooks.
+
+        Args:
+            batch (Any):
+                A single batch from the loader.
+            sample (bool, optional):
+                Whether to sample targets from the model output (true Fisher).
+            reduction (str, optional):
+                Reduction strategy passed to the task's training loss.
+        """
         loss = self.task.get_train_loss(
             model=self.model,
             batch=batch,
@@ -180,12 +272,19 @@ class InfluenceFunctionComputer(AbstractComputer):
         )
         loss.backward()
 
+    # ------------------------------------------------------------------ EK-FAC fitting
+
     def fit_covariances(self, loader: torch.utils.data.DataLoader) -> None:
-        """Fit the pre-activation and pseudo-gradient covariance matrices given the loader.
+        """Fit the activation and pseudo-gradient covariances.
+
+        Runs ``n_epoch`` passes over the loader, triggering the forward /
+        backward hooks to accumulate uncentered second-moment statistics; the
+        accumulators are then normalized by the total number of examples.
 
         Args:
             loader (DataLoader):
-                Dataloader in which covariances are computed for.
+                Loader yielding the training data over which covariances are
+                computed.
         """
         if self._covariance_done:
             self.logger.info("Covariance computation is already done. Skipping.")
@@ -204,7 +303,6 @@ class InfluenceFunctionComputer(AbstractComputer):
                 examples_seen += self.task.get_batch_size(batch)
 
         with torch.no_grad():
-            # Normalize the covariances by the number of data points.
             for name in self.kronecker_modules_name:
                 self.activation_cov[name] /= examples_seen
                 self.activation_cov[name] = self.activation_cov[name].to(
@@ -219,12 +317,20 @@ class InfluenceFunctionComputer(AbstractComputer):
         self.logger.info(f"Time for computing covariances: {time.time() - t0}")
 
     def fit_eigendecompositions(self, keep_cache: bool = False) -> None:
-        """Compute eigendecomposition of all covariances.
+        """Eigendecompose the fitted covariances.
+
+        Produces the per-module eigenvectors (``activation_cov_eigvecs`` /
+        ``pseudograd_cov_eigvecs``) used as the EK-FAC basis. The covariance
+        matrices themselves are dropped after decomposition unless
+        ``keep_cache`` is set.
 
         Args:
-            keep_cache (bool):
-                If true, delete the covariance matrices and eigenvalues from memory (just keeping the eigenbasis),
-                after performing the eigendecomposition. Defaults to True to save memory.
+            keep_cache (bool, optional):
+                If ``False`` (default), drop the raw covariance matrices and
+                their eigenvalues from memory once the eigenbasis has been
+                extracted (downstream EK-FAC steps only need the
+                eigenvectors). Set to ``True`` to retain everything for
+                inspection.
         """
         if self._eigendecompositon_done:
             self.logger.info(
@@ -262,15 +368,18 @@ class InfluenceFunctionComputer(AbstractComputer):
     def compute_kronecker_lambda(
         self, module_name: str, per_batch_grads: torch.Tensor
     ) -> None:
-        """Compute the Lambda term (corrected eigenvalues) for the EK-FAC.
+        """Accumulate the EK-FAC corrected eigenvalues (Lambda) for one module.
 
-        For details, see https://arxiv.org/pdf/2308.03296.pdf.
+        The corrected eigenvalues are the squared per-sample gradient
+        coordinates in the EK-FAC eigenbasis, averaged over the data; see
+        Eq. (53) of Grosse et al. (2023). Computed in vectorized form across
+        the batch axis.
 
         Args:
             module_name (str):
-                Name of the module.
-            per_batch_grads (torch.Tensor)
-                Individual per batch gradients.
+                Qualified module name.
+            per_batch_grads (torch.Tensor):
+                Per-sample gradients shaped ``(batch_size, out_dim, in_dim)``.
         """
         assert len(per_batch_grads.shape) == 3
 
@@ -280,27 +389,25 @@ class InfluenceFunctionComputer(AbstractComputer):
                 dtype=self.grads_dtype,
                 device=per_batch_grads.device,
             )
+        # Rotate gradients into the EK-FAC eigenbasis: U_S^T @ grads @ U_A.
+        # The Lambda factor is the squared rotated gradient summed across the
+        # batch. This vectorized form avoids a Python-level batch loop.
         grads_rot = torch.matmul(
-            per_batch_grads, self.activation_cov_eigvecs[module_name]
+            self.pseudograd_cov_eigvecs[module_name].t(),
+            torch.matmul(per_batch_grads, self.activation_cov_eigvecs[module_name]),
         )
-
-        batch_size = grads_rot.shape[0]
-        for i in range(batch_size):
-            weight_grad_rot = torch.matmul(
-                self.pseudograd_cov_eigvecs[module_name].t(), grads_rot[i, :, :]
-            )
-            self.kronecker_eigvals[module_name].add_(torch.square(weight_grad_rot))
+        self.kronecker_eigvals[module_name].add_(torch.square(grads_rot).sum(dim=0))
 
     def compute_full_factors(
         self, module_name: str, per_batch_grads: torch.Tensor
     ) -> None:
-        """Compute the full Fisher given the `module_name`.
+        """Accumulate the full Fisher for a LayerNorm / BatchNorm module.
 
         Args:
             module_name (str):
-                Name of the module.
-            per_batch_grads (torch.Tensor)
-                Individual per batch gradients.
+                Qualified module name.
+            per_batch_grads (torch.Tensor):
+                Per-sample gradients shaped ``(batch_size, num_params)``.
         """
         assert len(per_batch_grads.shape) == 2
         if module_name not in self.full_factors:
@@ -315,13 +422,13 @@ class InfluenceFunctionComputer(AbstractComputer):
     def compute_diag_lambda(
         self, module_name: str, per_batch_grads: torch.Tensor
     ) -> None:
-        """Compute the diagonal Fisher given the `module_name`.
+        """Accumulate the diagonal Fisher for an Embedding module.
 
         Args:
             module_name (str):
-                Name of the module.
-            per_batch_grads (torch.Tensor)
-                Individual per batch gradients.
+                Qualified module name.
+            per_batch_grads (torch.Tensor):
+                Per-sample gradients shaped ``(batch_size, num_emb, emb_dim)``.
         """
         assert len(per_batch_grads.shape) == 3
         if module_name not in self.diag_factors:
@@ -333,11 +440,17 @@ class InfluenceFunctionComputer(AbstractComputer):
         self.diag_factors[module_name].add_(torch.square(per_batch_grads).sum(dim=0))
 
     def fit_additional_factors(self, loader: torch.utils.data.DataLoader) -> None:
-        """Fit additional factors (e.g., Lambda, full Fisher, and diagonal Fisher) given the loader.
+        """Fit the per-module Fisher quantities used for preconditioning.
+
+        Runs ``n_epoch`` passes over the loader, computing per-sample gradients
+        via ``torch.func.vmap`` and dispatching to ``compute_kronecker_lambda``
+        / ``compute_full_factors`` / ``compute_diag_lambda`` per module. Also
+        sets up the per-module damping factor: ``self.damping`` if provided,
+        otherwise the ``0.1 * mean(eigvals)`` heuristic.
 
         Args:
             loader (DataLoader):
-                Dataloader in which additional factors are computed for.
+                Loader yielding the training data.
         """
         if self._additional_factors_done:
             self.logger.info(
@@ -372,19 +485,16 @@ class InfluenceFunctionComputer(AbstractComputer):
                 with torch.no_grad():
                     for name, module in zip(self.modules_name, self.modules):
                         if name in self.kronecker_modules_name:
-                            # Compute the Lambda on K-FAC eigenbasis.
                             per_batch_grads = make_grads_dict_to_matrix(
                                 module, name, grads_dict
                             ).to(dtype=self.grads_dtype)
                             self.compute_kronecker_lambda(name, per_batch_grads)
                         elif name in self.full_modules_name:
-                            # Compute the full Fisher.
                             per_batch_grads = make_grads_dict_to_matrix(
                                 module, name, grads_dict
                             ).to(dtype=self.grads_dtype)
                             self.compute_full_factors(name, per_batch_grads)
                         elif name in self.diag_modules_name:
-                            # Compute the diagonal Fisher.
                             per_batch_grads = make_grads_dict_to_matrix(
                                 module, name, grads_dict
                             ).to(dtype=self.grads_dtype)
@@ -393,7 +503,7 @@ class InfluenceFunctionComputer(AbstractComputer):
                             raise InvalidModuleError()
 
         with torch.no_grad():
-            # Normalize the statistics by the number of data points and set up the damping term.
+            # Normalize and set up damping per module.
             for name in self.kronecker_modules_name:
                 self.kronecker_eigvals[name] /= examples_seen
                 self.kronecker_eigvals[name] = self.kronecker_eigvals[name].to(
@@ -419,7 +529,9 @@ class InfluenceFunctionComputer(AbstractComputer):
                 else:
                     self.damping_factors[name] = self.damping
 
-                # Invert the full Fisher matrix and apply damping.
+                # Invert and re-densify in one shot: (V diag(eigvals + lambda) V^T).
+                # `self.full_factors[name]` will be used directly as the
+                # damped inverse downstream.
                 inv_eigvals = eigvals + self.damping_factors[name]
                 self.full_factors[name] = torch.matmul(
                     torch.matmul(eigvecs, torch.diag(inv_eigvals)), eigvecs.t()
@@ -429,7 +541,10 @@ class InfluenceFunctionComputer(AbstractComputer):
             for name in self.diag_modules_name:
                 self.diag_factors[name] /= examples_seen
                 self.diag_factors[name] = self.diag_factors[name].to(self.grads_dtype)
-                if isinstance(self.damping, str) and self.damping == "heuristic":
+                # Match the heuristic damping behavior used by the Kronecker /
+                # full branches: a `None` damping triggers the
+                # ``0.1 * mean(eigvals)`` heuristic.
+                if self.damping is None:
                     self.damping_factors[name] = 0.1 * torch.mean(
                         self.diag_factors[name]
                     )
@@ -437,38 +552,62 @@ class InfluenceFunctionComputer(AbstractComputer):
                     self.damping_factors[name] = self.damping
 
         self._additional_factors_done = True
-        print("Time for computing Lambda:", time.time() - t2)
+        self.logger.info(f"Time for computing Lambda: {time.time() - t2}")
 
     def build_curvature_blocks(
         self, loader: torch.utils.data.DataLoader, keep_cache: bool = False
     ) -> None:
-        """Perform EK-FAC computations.
+        """Fit every EK-FAC factor end-to-end.
+
+        Runs :meth:`fit_covariances`, :meth:`fit_eigendecompositions`, removes
+        the hooks, and runs :meth:`fit_additional_factors`. After this call the
+        computer is ready for score computation.
 
         Args:
             loader (DataLoader):
-                Dataloader in EK-FAC factors are computed for.
+                Loader yielding the training data.
             keep_cache (bool, optional):
-                If set to False, remove all forward and backward hooks after EK-FAC.
+                Forwarded to :meth:`fit_eigendecompositions`. Defaults to
+                ``False``.
         """
         self.fit_covariances(loader=loader)
         self.fit_eigendecompositions(keep_cache=keep_cache)
+        self.remove_handles()
+        self.fit_additional_factors(loader=loader)
+
+    def remove_handles(self) -> None:
+        """Remove all forward and backward hooks installed by :meth:`initialize`."""
         for handle in self._handles:
             handle.remove()
         self._handles = []
-        self.fit_additional_factors(loader=loader)
+
+    # ------------------------------------------------------------------ preconditioning
 
     def precondition_grads(
         self,
         module_name: str,
         grads: torch.Tensor,
     ) -> torch.Tensor:
-        """Given the `module_name` and `grads`, apply the preconditioning.
+        """Apply the inverse-Hessian preconditioner to one module's gradients.
+
+        Dispatches by Fisher branch:
+
+          * Kronecker: rotate ``grads`` into the EK-FAC eigenbasis, divide by
+            ``eigvals + lambda``, rotate back.
+          * Full: matmul with the precomputed damped-inverse dense factor.
+          * Diagonal: divide elementwise by ``diag + lambda``.
 
         Args:
             module_name (str):
-                Name of the module in which gradients are computed on.
+                Qualified module name.
             grads (torch.Tensor):
-                Reshaped gradients for the given module.
+                Per-sample gradients for this module, with leading batch axis.
+
+        Returns:
+            torch.Tensor: the preconditioned gradients, same shape as ``grads``.
+
+        Raises:
+            InvalidModuleError: if ``module_name`` is unknown.
         """
         if module_name in self.kronecker_modules_name:
             grads_rot = torch.matmul(
@@ -492,7 +631,7 @@ class InfluenceFunctionComputer(AbstractComputer):
             )
 
         elif module_name in self.full_modules_name:
-            # Note that the Fisher is already inverted and damping is applied.
+            # `full_factors[module_name]` is the already-inverted damped Fisher.
             precond_grads = torch.matmul(
                 grads.to(dtype=self.grads_dtype), self.full_factors[module_name]
             )
@@ -510,7 +649,18 @@ class InfluenceFunctionComputer(AbstractComputer):
     def _get_grads_dict(
         self, batch: Any, use_measurement: bool = False
     ) -> Dict[str, torch.Tensor]:
-        """Given a batch, compute the individual gradient and reshape it into a 2D matrix."""
+        """Compute per-sample gradients (training-loss or measurement) via vmap.
+
+        Args:
+            batch (Any):
+                A single batch.
+            use_measurement (bool, optional):
+                If ``True``, differentiate ``get_measurement``; if ``False``
+                (default), differentiate ``get_train_loss``.
+
+        Returns:
+            Dict[str, torch.Tensor]: per-parameter per-sample gradients.
+        """
         grads_dict = torch.func.vmap(
             self._compute_measurement_grad()
             if use_measurement
@@ -522,11 +672,26 @@ class InfluenceFunctionComputer(AbstractComputer):
 
     def _get_precond_grads_dict(
         self,
-        batch,
+        batch: Any,
         use_measurement: bool = False,
         disable_precondition: bool = False,
     ) -> Dict[str, torch.Tensor]:
-        """Given a batch, compute the individual gradient, reshape it into a 2D matrix, and apply preconditioning."""
+        """Compute per-sample gradients and apply the preconditioner per module.
+
+        Args:
+            batch (Any):
+                A single batch.
+            use_measurement (bool, optional):
+                If ``True``, differentiate the measurement function; otherwise
+                the training loss.
+            disable_precondition (bool, optional):
+                If ``True``, skip preconditioning (i.e. treat the Hessian as
+                the identity).
+
+        Returns:
+            Dict[str, torch.Tensor]: per-module preconditioned gradients,
+            flattened to ``(batch_size, num_params)``.
+        """
         batch_size = self.task.get_batch_size(batch)
         grads_dict = self._get_grads_dict(batch=batch, use_measurement=use_measurement)
 
@@ -549,23 +714,32 @@ class InfluenceFunctionComputer(AbstractComputer):
         del grads_dict
         return precond_grads_dict
 
+    # ------------------------------------------------------------------ scoring
+
     def compute_scores_with_batch(
         self, batch1: Any, batch2: Any, disable_precondition: bool = False
     ) -> torch.Tensor:
-        """Compute pairwise influences scores between data points in `batch1` and `batch2`.
+        """Compute pairwise influence scores for a pair of batches.
+
+        ``batch1`` is treated as the query batch (its gradients are
+        preconditioned using ``get_measurement``); ``batch2`` is treated as
+        the training batch (raw ``get_train_loss`` gradients).
 
         Args:
-            batch1 (object):
-                The first set of data points from the data loader.
-            batch2 (object):
-                The second set of data points from the data loader.
+            batch1 (Any):
+                Query (test) batch.
+            batch2 (Any):
+                Training batch.
             disable_precondition (bool, optional):
-                If set to True, assume the Hessian to be identity.
+                If ``True``, skip preconditioning (identity Hessian).
+
+        Returns:
+            torch.Tensor: ``(|batch1|, |batch2|)`` table of pairwise scores.
         """
         self.model.eval()
         precond_grads_dict1 = self._get_precond_grads_dict(
             batch=batch1,
-            use_measurement=False,
+            use_measurement=True,
             disable_precondition=disable_precondition,
         )
         grads_dict2 = self._get_grads_dict(batch=batch2, use_measurement=False)
@@ -593,29 +767,37 @@ class InfluenceFunctionComputer(AbstractComputer):
         train_loader: torch.utils.data.DataLoader,
         disable_precondition: bool = False,
     ) -> torch.Tensor:
-        """Compute pairwise influence scores between `test_loader` and `train_loader`.
+        """Compute pairwise influence scores between two loaders.
+
+        Iterates the test loader in the outer loop and the train loader in
+        the inner loop. The query side uses ``get_measurement``; the train
+        side uses ``get_train_loss``.
 
         Args:
             test_loader (DataLoader):
-                The loader with test dataset.
+                Loader yielding query (test) data.
             train_loader (DataLoader):
-                The loader with training dataset.
+                Loader yielding training data.
             disable_precondition (bool, optional):
-                If set to True, assume the Hessian to be identity.
+                If ``True``, skip preconditioning (identity Hessian).
+
+        Returns:
+            torch.Tensor: ``(num_test, num_train)`` table of pairwise scores.
         """
         self.model.eval()
 
         score_table = torch.zeros(
             (len(test_loader.dataset), len(train_loader.dataset)),
-            dtype=self.grads_dtype,
+            dtype=self.score_dtype,
             device=self.task.device,
             requires_grad=False,
         )
 
         num_processed_test = 0
         for test_batch in test_loader:
-            print(
-                f"Processed {num_processed_test} test data points (out of {len(test_loader.dataset)})."
+            self.logger.info(
+                f"Processed {num_processed_test} test data points "
+                f"(out of {len(test_loader.dataset)})."
             )
             test_batch_size = self.task.get_batch_size(test_batch)
             precond_test_grads_dict = self._get_precond_grads_dict(
@@ -652,13 +834,22 @@ class InfluenceFunctionComputer(AbstractComputer):
     def compute_self_scores_with_loader(
         self, loader: torch.utils.data.DataLoader, disable_precondition: bool = False
     ) -> torch.Tensor:
-        """Compute self-influence scores of all data points in `loader`.
+        """Compute self-influence scores for every data point in a loader.
+
+        For each data point ``z``, returns ``grad L(z)^T H^{-1} grad L(z)``,
+        i.e. the diagonal of the IF score table when ``train == test`` and
+        both use the training loss.
 
         Args:
             loader (DataLoader):
-                The loader for which self-influence scores are computed.
+                Loader yielding the data points for which self-influences
+                will be computed.
             disable_precondition (bool, optional):
-                If set to True, assume the Hessian to be identity.
+                If ``True``, skip preconditioning (identity Hessian).
+
+        Returns:
+            torch.Tensor: 1-D tensor of self-influence scores, length equal
+            to the size of the loader's dataset.
         """
         self.model.eval()
 

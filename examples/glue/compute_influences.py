@@ -1,3 +1,13 @@
+"""Compute training-data-attribution scores for the GLUE example.
+
+After training with ``train.py``, this script loads the final checkpoint
+and computes EK-FAC influence-function scores on the first 128 validation
+sequences, saving the result under ``files/results/{model_id}/``.
+
+Run from the project root:
+    python -m examples.glue.compute_influences
+"""
+
 import os
 from typing import List
 

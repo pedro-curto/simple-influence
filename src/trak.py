@@ -1,5 +1,13 @@
+"""TRAK wrapper.
+
+Thin adapter that funnels the project's `AbstractTask` and data loaders into
+the upstream `TRAKer` implementation from
+https://github.com/MadryLab/trak. The `task.get_model_output()` method must
+return a `trak.modelout_functions.AbstractModelOutput` subclass.
+"""
+
 import copy
-from typing import Any, List, Optional
+from typing import Any, List
 
 import torch
 import torch.nn as nn
@@ -10,6 +18,22 @@ from trak import TRAKer
 
 
 class TrakComputer(AbstractComputer):
+    """Compute TRAK attribution scores using the upstream `TRAKer`.
+
+    For each checkpoint we run TRAK's two-phase API: ``featurize`` accumulates
+    projected per-sample gradients across the training data, then ``score``
+    is invoked for the query data. After all checkpoints have been processed
+    the scores are pulled out via ``finalize_scores`` and the model's original
+    parameters are restored.
+
+    Attributes:
+        original_state_dict (dict): the model's parameters at construction
+            time (CPU-resident); restored after each score computation.
+        proj_dim (int): TRAK random-projection dimension.
+        save_dir (str): directory in which TRAK persists intermediate
+            features and scores.
+    """
+
     def __init__(
         self,
         model: nn.Module,
@@ -17,24 +41,26 @@ class TrakComputer(AbstractComputer):
         proj_dim: int = 4096,
         save_dir: str = "temp/trak_results",
     ) -> None:
-        """Initializes the `TrakComputer` class.
-
-        Trak computers use the implementation provided by the authors. For details, please see:
-        https://github.com/MadryLab/trak.
+        """Initialize the TRAK computer.
 
         Args:
             model (nn.Module):
-                The PyTorch model for which gradient similarities are computed.
+                Model whose final parameters are the starting point; the
+                computer overwrites these with each checkpoint while scoring
+                and restores them at the end.
             task (AbstractTask):
-                The task for the pipeline.
+                Task adapter. ``task.get_model_output()`` must return a
+                non-``None`` TRAK model-output adapter.
             proj_dim (int, optional):
-                Random projection dimension.
+                Random-projection dimension. Defaults to ``4096``.
             save_dir (str, optional):
-                The directory to save intermediate caches.
+                Directory for TRAK intermediates. Defaults to
+                ``"temp/trak_results"``.
         """
         super().__init__(model=model, task=task, logger_name=self.__class__.__name__)
 
-        # Save original parameters to CPU.
+        # Snapshot the original parameters on CPU so we can restore them
+        # after each score computation.
         self.original_state_dict = copy.deepcopy(self.model.state_dict())
         for name, tensor in self.original_state_dict.items():
             self.original_state_dict[name] = tensor.cpu()
@@ -43,7 +69,7 @@ class TrakComputer(AbstractComputer):
         self.save_dir = save_dir
 
     def _reload_original_params(self) -> None:
-        """Reload the initial parameters and buffers, given at the initialization stage."""
+        """Restore the parameters captured at construction time."""
         self.model.load_state_dict(self.original_state_dict)
         self.model = self.model.to(self.task.device)
 
@@ -54,17 +80,21 @@ class TrakComputer(AbstractComputer):
         expt_name: str,
         checkpoints: List[str],
     ) -> torch.Tensor:
-        """Compute pairwise influence scores between data points in `batch1` and `batch2`.
+        """Compute TRAK scores for a pair of batches.
 
         Args:
-            batch1 (object):
-                The first set of data points from the data loader.
-            batch2 (object):
-                The second set of data points from the data loader.
+            batch1 (Any):
+                Training batch (used in TRAK's featurize phase).
+            batch2 (Any):
+                Query batch (used in TRAK's score phase).
             expt_name (str):
-                The name of the experiment.
-            checkpoints (list):
-                A list of paths to the checkpoints.
+                Name TRAK uses to scope its on-disk caches.
+            checkpoints (List[str]):
+                Paths to checkpoints to ensemble across.
+
+        Returns:
+            torch.Tensor: ``(|batch2|, |batch1|)`` score table (rows = query,
+            cols = train), cast to ``self.score_dtype``.
         """
         self.model.eval()
 
@@ -108,17 +138,20 @@ class TrakComputer(AbstractComputer):
         expt_name: str,
         checkpoints: List[str],
     ) -> torch.Tensor:
-        """Compute pairwise similarity scores between `test_loader` and `train_loader`.
+        """Compute TRAK scores for a pair of loaders.
 
         Args:
             test_loader (DataLoader):
-                The loader with test dataset.
+                Loader yielding query (test) data.
             train_loader (DataLoader):
-                The loader with training dataset.
+                Loader yielding training data.
             expt_name (str):
-                The name of the experiment.
-            checkpoints (list):
-                A list of paths to the checkpoints.
+                Name TRAK uses to scope its on-disk caches.
+            checkpoints (List[str]):
+                Paths to checkpoints to ensemble across.
+
+        Returns:
+            torch.Tensor: ``(num_test, num_train)`` score table.
         """
         self.model.eval()
 
@@ -163,22 +196,27 @@ class TrakComputer(AbstractComputer):
         expt_name: str,
         checkpoints: List[str],
     ) -> torch.Tensor:
-        """Compute self-similarity scores of all data points in `loader`.
+        """Compute TRAK self-similarity scores via the diagonal of the full table.
+
+        TRAK does not expose a direct self-score path, so this is a
+        convenience wrapper that runs :meth:`compute_scores_with_loader`
+        with ``train == test`` and returns the diagonal.
 
         Args:
             loader (DataLoader):
-                The loader for which self-similarity scores are computed.
-            checkpoints (list):
-                A list of paths to the checkpoints.
+                Loader yielding data points.
             expt_name (str):
-                The name of the experiment.
-            checkpoints (list):
-                A list of paths to the checkpoints.
+                Name TRAK uses to scope its on-disk caches.
+            checkpoints (List[str]):
+                Paths to checkpoints to ensemble across.
+
+        Returns:
+            torch.Tensor: 1-D tensor of self-similarity scores.
         """
         self.model.eval()
 
-        # There isn't an easy way to compute the self-influence scores.
-        # Hence, compute all pairwise scores, and return the diagonal elements.
+        # TRAK doesn't have a direct self-influence path; compute the full
+        # table and return the diagonal.
         expt_name = expt_name + "_self_scores"
         scores = self.compute_scores_with_loader(
             test_loader=loader,

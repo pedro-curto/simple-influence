@@ -6,6 +6,7 @@ from torch import nn
 from torch.utils import data
 
 from examples.glue.task import TextClassificationTask
+from examples.wiki.task import LanguageModelTask
 from src.abstract_task import AbstractTask, validate_task
 from tests.dummy_tasks import ConvBNTask, ConvTask, MLPTask
 
@@ -103,7 +104,7 @@ def prepare_test(
             num_data=valid_size,
             seed=seed,
         )
-        task = TextClassificationTask(device=device)
+        task = LanguageModelTask(device=device)
     else:
         raise NotImplementedError(f"{test_name} is not a valid test configuration.")
     return model.to(device=device), train_loader, valid_loader, task

@@ -1,4 +1,15 @@
-from typing import Any
+"""Representation-similarity TDA baseline.
+
+For each pair of query / training points, this computer measures the
+similarity between their intermediate representations (typically the output
+of the layer just before the final classifier). The relevant layer is
+specified by ``AbstractTask.representation_module()``.
+
+See https://arxiv.org/pdf/2006.04528.pdf for the use of representation
+similarity as a TDA baseline.
+"""
+
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -8,7 +19,20 @@ from src.abstract_task import AbstractTask
 
 
 class RepresentationSimilarityComputer(AbstractComputer):
-    # Specifies the dtype for computing similarity scores.
+    """Compute pairwise representation-similarity attribution scores.
+
+    A forward hook is registered on the module returned by
+    ``task.representation_module()``; we then run forward passes on each
+    batch and read off the captured activations.
+
+    Attributes:
+        target_module_name (str): qualified name of the representation module.
+        metric (str): ``"dot"``, ``"cos"``, or ``"l2"``.
+    """
+
+    # Internal precision for the similarity computation. Activations are cast
+    # up to float64 to avoid catastrophic cancellation when computing pairwise
+    # L2 distances of similar vectors.
     _similarity_dtype: torch.dtype = torch.float64
 
     def __init__(
@@ -17,20 +41,23 @@ class RepresentationSimilarityComputer(AbstractComputer):
         task: AbstractTask,
         metric: str = "dot",
     ) -> None:
-        """Initializes the `RepresentationsSimilarityComputer` class.
-
-        This class performs TDA using similarity between representations (activations) based on a specified metric
-        (for more details, see https://arxiv.org/pdf/2006.04528.pdf).
+        """Initialize the representation-similarity computer.
 
         Args:
             model (nn.Module):
-                The PyTorch model for which representation similarities are computed.
+                Model whose intermediate representations are compared.
             task (AbstractTask):
-                The task for the pipeline. It is essential that `AbstractTask.representation_modules()`
-                is defined for this task.
+                Task adapter. ``task.representation_module()`` must return a
+                non-``None`` module name.
             metric (str, optional):
-                The metric used to measure similarity. Supported metrics include "l2", "dot",
-                and "cos". Defaults to "dot".
+                Similarity metric: ``"dot"`` (default), ``"cos"``, or
+                ``"l2"``. For ``"l2"``, we return the negative L2 distance so
+                that "more similar" still corresponds to a higher score.
+
+        Raises:
+            NotImplementedError: if ``task.representation_module()`` is
+                ``None`` or ``metric`` is not supported.
+            AttributeError: if the named module is not found on the model.
         """
         super().__init__(model=model, task=task, logger_name=self.__class__.__name__)
 
@@ -52,12 +79,16 @@ class RepresentationSimilarityComputer(AbstractComputer):
             raise NotImplementedError(error_msg)
 
         self._handle = None
-        self._target_module = None
-        self._temp_acts = None
+        self._target_module: Optional[nn.Module] = None
+        self._temp_acts: Optional[torch.Tensor] = None
         self.initialize()
 
     def initialize(self) -> None:
-        """Initializes the forward hook to cache intermediate activation."""
+        """Register the forward hook used to capture intermediate activations.
+
+        Raises:
+            AttributeError: if no module matches ``self.target_module_name``.
+        """
         self.logger.info("Initializing forward hook...")
         for name, module in self.model.named_modules():
             if name == self.target_module_name:
@@ -67,10 +98,10 @@ class RepresentationSimilarityComputer(AbstractComputer):
 
         error_msg = f"Unable to find the specified module {self.target_module_name}."
         self.logger.error(error_msg)
-        assert AttributeError(error_msg)
+        raise AttributeError(error_msg)
 
     def remove_hook(self) -> None:
-        """Removes the initialized hook."""
+        """Remove the registered forward hook and clear cached activations."""
         self.logger.info("Removing hook...")
         self._handle.remove()
         self._handle = None
@@ -79,18 +110,34 @@ class RepresentationSimilarityComputer(AbstractComputer):
     def _forward_hook(
         self, module: nn.Module, inputs: torch.Tensor, outputs: torch.Tensor
     ) -> None:
-        """Cache the intermediate activations."""
+        """Cache the output of the representation module.
+
+        Args:
+            module (nn.Module):
+                The intercepted module (unused).
+            inputs (torch.Tensor):
+                The inputs to the module (unused).
+            outputs (torch.Tensor):
+                The module's outputs; cached in ``self._temp_acts`` so the
+                caller can retrieve them after the forward pass.
+        """
         del inputs
         self._temp_acts = outputs.data
 
     def _compute_similarity(
         self, batch_vector1: torch.Tensor, batch_vector2: torch.Tensor
     ) -> torch.Tensor:
-        """Computes the pairwise similarities between vectors in `batch_vector1` and `batch_vector2`.
+        """Compute the pairwise similarity matrix between two batches of vectors.
 
-        Given vectors of size `batch_size x dim`, the output is a matrix of size `batch_size1 x batch_size2`.
-        Each element in the output matrix represents the similarity distance between corresponding vectors
-        from `batch_vector1` and `batch_vector2`.
+        Args:
+            batch_vector1 (torch.Tensor):
+                ``(B1, D)`` first set of vectors.
+            batch_vector2 (torch.Tensor):
+                ``(B2, D)`` second set of vectors.
+
+        Returns:
+            torch.Tensor: ``(B1, B2)`` similarity matrix; for ``"l2"`` the
+            sign is flipped so that higher means more similar.
         """
         if self.metric == "dot":
             score = torch.matmul(batch_vector1, batch_vector2.t())
@@ -101,14 +148,25 @@ class RepresentationSimilarityComputer(AbstractComputer):
             score /= query_norm.unsqueeze(-1)
             score /= train_norm.unsqueeze(0)
         elif self.metric == "l2":
-            # For consistency (higher score means similar), we multiply the score by -1.
+            # Higher score means more similar -> we negate the L2 distance.
             score = -torch.cdist(batch_vector1, batch_vector2, p=2)
         else:
             raise RuntimeError()
         return score.to(self.score_dtype)
 
     def _perform_forward_pass_and_extract_acts(self, batch: Any) -> torch.Tensor:
-        """Perform the forward pass with the given `batch`."""
+        """Run a forward pass and return the cached activations.
+
+        Args:
+            batch (Any):
+                A single batch.
+
+        Returns:
+            torch.Tensor: ``(B, D)`` representation matrix, cast to the
+            similarity dtype.
+        """
+        # We don't care about the loss value here; we just want to drive the
+        # forward pass so the hook fires.
         _ = self.task.get_train_loss(
             model=self.model,
             batch=batch,
@@ -124,15 +182,22 @@ class RepresentationSimilarityComputer(AbstractComputer):
     def compute_scores_with_batch(
         self, batch1: Any, batch2: Any, remove_hook: bool = False
     ) -> torch.Tensor:
-        """Compute pairwise similarity scores between data points in `batch1` and `batch2`.
+        """Compute pairwise similarity scores between two batches.
 
         Args:
-            batch1 (object):
-                The first set of data points from the data loader.
-            batch2 (object):
-                The second set of data points from the data loader.
+            batch1 (Any):
+                First batch.
+            batch2 (Any):
+                Second batch.
             remove_hook (bool, optional):
-                If set to True, removes hook after computing the pairwise similarity scores. Defaults to False.
+                If ``True``, remove the forward hook after scoring. Defaults
+                to ``False`` so consecutive calls can reuse the same hook.
+
+        Returns:
+            torch.Tensor: ``(|batch1|, |batch2|)`` similarity matrix.
+
+        Raises:
+            RuntimeError: if the hook has already been removed.
         """
         if self._handle is None:
             error_msg = (
@@ -156,15 +221,21 @@ class RepresentationSimilarityComputer(AbstractComputer):
         train_loader: torch.utils.data.DataLoader,
         remove_hook: bool = True,
     ) -> torch.Tensor:
-        """Compute pairwise similarity scores between `test_loader` and `train_loader`.
+        """Compute pairwise similarity scores between two loaders.
 
         Args:
             test_loader (DataLoader):
-                The loader with test dataset.
+                Loader yielding query (test) data.
             train_loader (DataLoader):
-                The loader with training dataset.
+                Loader yielding training data.
             remove_hook (bool, optional):
-                If set to True, removes hook after computing the pairwise similarity scores. Defaults to True.
+                If ``True`` (default), remove the forward hook after scoring.
+
+        Returns:
+            torch.Tensor: ``(num_test, num_train)`` similarity matrix.
+
+        Raises:
+            RuntimeError: if the hook has already been removed.
         """
         if self._handle is None:
             error_msg = (
@@ -211,7 +282,15 @@ class RepresentationSimilarityComputer(AbstractComputer):
         self,
         loader: torch.utils.data.DataLoader,
     ) -> None:
-        # The notion of self-influence does not exist for RepresentationSimilarityComputer.
+        """Not supported: self-similarity is undefined for representation similarity.
+
+        Args:
+            loader (DataLoader):
+                Unused.
+
+        Raises:
+            NotImplementedError: always.
+        """
         del loader
         error_msg = (
             f"self-score computation is not supported for {self.__class__.__name__}."

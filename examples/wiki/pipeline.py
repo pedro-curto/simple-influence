@@ -1,3 +1,9 @@
+"""Pipeline for the WikiText-2 (GPT-2) language-modeling example.
+
+Defines the GPT-2 wrapper (with a HuggingFace-``Conv1D`` -> ``nn.Linear``
+substitution so EK-FAC can see the layers) and the WikiText-2 loaders.
+"""
+
 from itertools import chain
 from typing import List, Optional, Tuple
 
@@ -14,9 +20,21 @@ from transformers import (
 from transformers.pytorch_utils import Conv1D
 
 
-def replace_conv1d_modules(model):
-    # GPT-2 is defined in terms of Conv1D. However, this does not work for EK-FAC.
-    # Here, we convert these Conv1D modules to linear modules recursively.
+def replace_conv1d_modules(model: nn.Module) -> None:
+    """In-place swap of every HuggingFace ``Conv1D`` with an equivalent ``nn.Linear``.
+
+    GPT-2 uses HuggingFace's ``Conv1D`` (a transposed-weight linear layer) for
+    its attention and MLP projections. EK-FAC in this repo only recognizes
+    ``nn.Linear`` / ``nn.Conv2d`` modules, so we walk the model tree
+    recursively and substitute each ``Conv1D`` with an ``nn.Linear`` whose
+    weight is the transpose of the original.
+
+    **Mutates `model` in place.**
+
+    Args:
+        model (nn.Module):
+            Module to walk and modify.
+    """
     for name, module in model.named_children():
         if len(list(module.children())) > 0:
             replace_conv1d_modules(module)
@@ -94,7 +112,7 @@ def get_loaders(
 def get_wiki_dataloader(
     batch_size: int,
     split: str = "train",
-    indices: List[int] = None,
+    indices: Optional[List[int]] = None,
 ) -> torch.utils.data.DataLoader:
     raw_datasets = load_dataset("wikitext", "wikitext-2-raw-v1")
 

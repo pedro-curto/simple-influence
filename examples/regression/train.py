@@ -1,3 +1,12 @@
+"""Training entry point for the UCI-regression example.
+
+Trains one or more regression MLPs (typically just one) and saves a
+checkpoint per epoch under ``files/checkpoints/{model_id}/``.
+
+Run from the project root:
+    python -m examples.regression.train
+"""
+
 import os
 import time
 from typing import Optional

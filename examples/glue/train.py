@@ -1,3 +1,12 @@
+"""Training entry point for the GLUE (BERT) example.
+
+Trains a BERT classifier on a GLUE sub-task and saves a checkpoint per
+epoch under ``files/checkpoints/{model_id}/``.
+
+Run from the project root:
+    python -m examples.glue.train
+"""
+
 import math
 import os
 import time

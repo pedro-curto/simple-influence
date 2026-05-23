@@ -1,7 +1,15 @@
 # Influence Functions Prototype
 
-Note that this repository is currently in development for a public release (which plan to happen in early 2024) and contains code related to active research projects.
-Please ask if you would like to share the code.
+A lightweight prototype for trying out **training data attribution (TDA)** methods on PyTorch
+models. Implements:
+
+- **Influence functions** with EK-FAC curvature approximation (Grosse et al. 2023)
+- **SOURCE** — segmented unrolled differentiation that handles non-converged and multi-stage training (Bae et al. 2024, [arXiv:2405.12186](https://arxiv.org/abs/2405.12186))
+- Baselines: **gradient similarity**, **representation similarity**, **TracIn / GAS**, and a thin wrapper around **TRAK**
+
+Designed to be easy to adapt to your own model and task — typically you only need to subclass
+`AbstractTask` (see `examples/` for four worked end-to-end pipelines covering regression, image
+classification, GLUE, and GPT-2 language modeling).
 
 ## Getting Started
 
@@ -15,79 +23,120 @@ To begin, follow these steps to set up your environment:
 2. Install this package and its dependencies within the newly created environment (if you are working on a machine without a GPU, you can choose the `pytorch_cpu` option instead):
     ```bash
     pip install -e '.[pytorch_gpu]' -f 'https://download.pytorch.org/whl/torch_stable.html'
-    pip install -e . 
-   ```
-   Also, note that the strict minimum version requirement for PyTorch is `2.0.0` (to support functorch).
-3. To verify that everything is functioning correctly, you can run one of the tests:
-    ```bash
-    python test_utils.py
-    python test_baselines.py
-    python test_ekfac.py
     ```
+   PyTorch `>=2.0.0` is required (the EK-FAC implementation uses `torch.func` / `functorch`).
+3. To verify that everything is functioning correctly, run the test suite:
+    ```bash
+    pytest tests/
+    ```
+   The non-smoke tests run on CPU and only depend on synthetic data. To also run the slower
+   GLUE/Wiki smoke tests, use `pytest -m smoke tests/`.
 
-### Running Regression Experiments
+## Quickstart
 
-Please note that the regression experiments exclusively utilize CPUs (without GPU) due its small size. To initiate the training process, execute the command below:
+```python
+from src.influence_function import InfluenceFunctionComputer
+from examples.mnist.task import ClassificationTask
+
+# `model` is any nn.Module; `train_loader` / `valid_loader` are standard PyTorch DataLoaders.
+task = ClassificationTask(device="cuda")
+computer = InfluenceFunctionComputer(model=model, task=task)
+computer.build_curvature_blocks(train_loader)                # one pass to build EK-FAC.
+scores = computer.compute_scores_with_loader(valid_loader, train_loader)
+# `scores[i, j]` is the influence of training point `j` on validation point `i`.
+```
+
+To swap in a different attribution method, replace `InfluenceFunctionComputer` with
+`GradientSimilarityComputer`, `RepresentationSimilarityComputer`, `TracinComputer`, or
+`TrakComputer` — each implements the same `compute_scores_with_loader(test_loader, train_loader)`
+interface.
+
+### SOURCE
+
+For non-converged or multi-stage training, use `SourceComputer`. It needs a list of checkpoints
+per training segment plus the (averaged) learning rate and total number of gradient updates per
+segment:
+
+```python
+from src.source import SourceComputer
+
+# Suppose you saved 6 checkpoints during training and want L = 3 segments
+# (early / middle / late), with 2 checkpoints per segment.
+source = SourceComputer(
+    model=model,                             # holds the final parameters theta_s
+    task=task,
+    checkpoints_per_segment=[
+        ["ckpts/epoch_2.pt", "ckpts/epoch_4.pt"],   # earliest segment
+        ["ckpts/epoch_6.pt", "ckpts/epoch_8.pt"],   # middle segment
+        ["ckpts/epoch_10.pt", "ckpts/epoch_12.pt"], # latest segment
+    ],
+    iters_per_segment=[K_1, K_2, K_3],       # gradient updates per segment
+    lrs_per_segment=[eta_1, eta_2, eta_3],   # averaged learning rate per segment
+)
+source.build_curvature_blocks(train_loader)
+scores = source.compute_scores_with_loader(valid_loader, train_loader)
+```
+
+With `L = 1` (a single segment), SOURCE reduces to an EK-FAC influence function with damping
+`lambda = 1 / (eta * K)` — i.e. the damping is *derived* from the training schedule rather than
+hand-tuned. Currently only `Linear` and `Conv2d` modules are supported by `SourceComputer`.
+
+## Running the examples
+
+All example scripts use absolute imports (`from examples.mnist.pipeline import ...`),
+so they must be run as Python modules from the **project root** — not by `cd`-ing
+into the example directory. Each example writes / reads relative paths under
+`examples/<name>/files/`, so first `cd` into the example directory.
+
+### Regression
+
+CPU-only (small enough that GPU has no benefit):
+
 ```bash
 cd examples/regression
-python train.py
-```
-Upon completion of the training, you can evaluate all the baseline TDA methods by running:
-```bash
-python compute_influences.py
-```
-For analysis of the influence distribution, I have provided a short script. You can execute it using:
-```bash
-cd evaluate
-python visualize_distribution.py
+python -m examples.regression.train               # writes checkpoints under files/checkpoints/
+python -m examples.regression.compute_influences  # writes scores under files/results/
+python -m examples.regression.evaluate.visualize_distribution
 ```
 
-### Running MNIST Experiments
+### MNIST
 
-To initiate model training, execute the command below:
 ```bash
 cd examples/mnist
-python train.py
+python -m examples.mnist.train
+python -m examples.mnist.compute_influences        # IF + SOURCE
+python -m examples.mnist.evaluate.visualize_influences
 ```
-Upon completing the training, you can run influence functions with:
-```bash
-python compute_influences.py
-```
-For visualization of the most influential training images, use:
-```bash
-python evaluate/visualize_influences.py
 ```
 
-### Running GLUE Experiments
+A small end-to-end smoke test (~1 minute on CPU) that trains briefly and runs
+both IF and SOURCE on the result:
 
-To initiate model training, follow the command below. Please be aware that this code has been tested on an A100 GPU with 80GB memory. For smaller GPUs, consider reducing the batch size:
+```bash
+cd examples/mnist
+PYTHONPATH=$(pwd)/../.. python smoke_test_source.py
+```
+
+### GLUE (BERT)
+
+Tested on an A100 80GB; reduce batch size for smaller GPUs.
+
 ```bash
 cd examples/glue
-python train.py
-```
-Upon completing the training, you can run influence function computations with:
-```bash
-python compute_influences.py
-```
-To display the most influential training sequences, use:
-```bash
-python evaluate/inspect_influences.py
+python -m examples.glue.train
+python -m examples.glue.compute_influences
+python -m examples.glue.evaluate.inspect_influences
 ```
 
-### Running GPT-2 Experiments
+### WikiText-2 (GPT-2)
 
-To initiate model training, follow the command below. Please be aware that this code has been tested on an A100 GPU with 80GB memory. For smaller GPUs, consider reducing the batch size:
+Tested on an A100 80GB; reduce batch size for smaller GPUs.
+
 ```bash
 cd examples/wiki
-python train.py
-```
-Upon completing the training, you can run influence function computations with:
-```bash
-python compute_influences.py
-```
-To display the most influential training sequences, use:
-```bash
-python evaluate/inspect_influences.py
+python -m examples.wiki.train
+python -m examples.wiki.compute_influences
+python -m examples.wiki.evaluate.inspect_influences
 ```
 
 ## Getting Started with Development
