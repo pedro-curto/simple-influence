@@ -16,9 +16,9 @@ from typing import Any, List, Union
 import torch
 import torch.nn as nn
 
-from src.abstract_computer import AbstractComputer
-from src.abstract_task import AbstractTask
-from src.gradient_similarity import GradientSimilarityComputer
+from simple_influence.abstract_computer import AbstractComputer
+from simple_influence.abstract_task import AbstractTask
+from simple_influence.gradient_similarity import GradientSimilarityComputer
 
 
 class TracinComputer(AbstractComputer):

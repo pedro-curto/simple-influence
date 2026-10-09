@@ -25,9 +25,9 @@ from typing import Any, Dict, Optional, Tuple
 import torch
 from torch import nn
 
-from src.abstract_computer import AbstractComputer
-from src.abstract_task import AbstractTask
-from src.ekfac_utils import (
+from simple_influence.abstract_computer import AbstractComputer
+from simple_influence.abstract_task import AbstractTask
+from simple_influence.ekfac_utils import (
     InvalidModuleError,
     extract_activations,
     extract_gradients,

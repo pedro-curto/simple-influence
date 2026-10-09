@@ -46,10 +46,10 @@ from typing import Any, Dict, List, Optional
 import torch
 import torch.nn as nn
 
-from src.abstract_computer import AbstractComputer
-from src.abstract_task import AbstractTask
-from src.ekfac_utils import make_grads_dict_to_matrix
-from src.influence_function import InfluenceFunctionComputer
+from simple_influence.abstract_computer import AbstractComputer
+from simple_influence.abstract_task import AbstractTask
+from simple_influence.ekfac_utils import make_grads_dict_to_matrix
+from simple_influence.influence_function import InfluenceFunctionComputer
 
 
 class _SegmentFactors:

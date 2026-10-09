@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict
 import torch
 import torch.nn as nn
 
-from src.abstract_task import AbstractTask, validate_task
+from simple_influence.abstract_task import AbstractTask, validate_task
 
 
 class AbstractComputer(ABC):
@@ -49,7 +49,7 @@ class AbstractComputer(ABC):
             model (nn.Module):
                 Model for which attribution scores will be computed.
             task (AbstractTask):
-                Task adapter for the model. See `src/abstract_task.py`.
+                Task adapter for the model. See `simple_influence/abstract_task.py`.
             logger_name (str):
                 Name passed to `logging.getLogger`; typically the subclass
                 name.
