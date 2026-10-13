@@ -163,7 +163,10 @@ class SourceComputer(AbstractComputer):
     def _load_checkpoint(self, checkpoint_path: str) -> None:
         """Load a state dict into `self.model` and place it on `task.device`."""
         payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-        state_dict = payload.get("model_state_dict", payload.get("state_dict", payload))
+        # try three different keys for the state dict
+        state_dict = payload.get(
+            "model_state", payload.get("model_state_dict", payload.get("state_dict", payload)),
+        )
         self.model.load_state_dict(state_dict)
         self.model = self.model.to(self.task.device)
         self.model.eval()
